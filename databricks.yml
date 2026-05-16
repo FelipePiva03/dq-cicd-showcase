@@ -13,11 +13,15 @@ include:
 
 variables:
   catalog:
-    description: Unity Catalog name
+    description: Unity Catalog name (overridden per target)
     default: dq_showcase
   notifications_email:
     description: Email for job failure notifications
     default: felipepiva02@gmail.com
+
+# NOTE: workspace.host is intentionally NOT set per target — DABs forbids
+# variable interpolation in auth fields. Both targets pick it up from the
+# DATABRICKS_HOST env var (set locally via .env, in CI via GitHub Secrets).
 
 targets:
 
@@ -28,7 +32,6 @@ targets:
     mode: development
     default: true
     workspace:
-      host: ${var.workspace_host}
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
     variables:
       catalog: dq_showcase_dev
@@ -41,18 +44,11 @@ targets:
   prod:
     mode: production
     workspace:
-      host: ${var.workspace_host}
       root_path: /Workspace/dq-cicd-showcase/prod
     variables:
       catalog: dq_showcase_prod
     run_as:
-      # On Free Trial we run as the workspace user; in real prod, swap to SP:
+      # On Free Edition we run as the workspace user; in real prod, swap to SP:
       # service_principal_name: ${var.sp_name}
       user_name: ${workspace.current_user.userName}
 
-# -----------------------------------------------------------------------------
-# Top-level variables that targets reference
-# -----------------------------------------------------------------------------
-variables:
-  workspace_host:
-    description: Databricks workspace URL (set via DATABRICKS_HOST env var or CLI)

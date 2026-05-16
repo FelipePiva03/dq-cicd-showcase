@@ -55,9 +55,9 @@ def main() -> None:
     _persist_results(spark, args.catalog, result.to_json_dict())
 
     if not result["success"]:
-        print(f"[gx] ❌ checkpoint {args.checkpoint} FAILED")
+        print(f"[gx] checkpoint {args.checkpoint} FAILED")
         sys.exit(1)
-    print(f"[gx] ✅ checkpoint {args.checkpoint} passed")
+    print(f"[gx] checkpoint {args.checkpoint} passed")
 
 
 def _persist_results(spark: SparkSession, catalog: str, payload: dict) -> None:
