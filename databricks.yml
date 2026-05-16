@@ -1,0 +1,58 @@
+# =============================================================================
+# Databricks Asset Bundle — dq-cicd-showcase
+# =============================================================================
+# Streaming Medallion pipeline with embedded Data Quality gates (GX + Soda).
+# Two targets: dev (default, personal workspace) and prod (CI-deployed).
+# =============================================================================
+
+bundle:
+  name: dq-cicd-showcase
+
+include:
+  - resources/jobs/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog name
+    default: dq_showcase
+  notifications_email:
+    description: Email for job failure notifications
+    default: felipepiva02@gmail.com
+
+targets:
+
+  # ---------------------------------------------------------------------------
+  # DEV — used for local development and PR validation deploys
+  # ---------------------------------------------------------------------------
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: ${var.workspace_host}
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: dq_showcase_dev
+    # In `development` mode, DABs auto-prefixes resource names with the user
+    # and disables schedules — perfect for safe iteration.
+
+  # ---------------------------------------------------------------------------
+  # PROD — deployed only from main branch via GitHub Actions
+  # ---------------------------------------------------------------------------
+  prod:
+    mode: production
+    workspace:
+      host: ${var.workspace_host}
+      root_path: /Workspace/dq-cicd-showcase/prod
+    variables:
+      catalog: dq_showcase_prod
+    run_as:
+      # On Free Trial we run as the workspace user; in real prod, swap to SP:
+      # service_principal_name: ${var.sp_name}
+      user_name: ${workspace.current_user.userName}
+
+# -----------------------------------------------------------------------------
+# Top-level variables that targets reference
+# -----------------------------------------------------------------------------
+variables:
+  workspace_host:
+    description: Databricks workspace URL (set via DATABRICKS_HOST env var or CLI)

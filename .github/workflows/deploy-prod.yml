@@ -1,0 +1,31 @@
+name: Deploy → prod
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy bundle to prod workspace
+    runs-on: ubuntu-latest
+    # Requires manual approval if `environment: prod` has protection rules
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main
+
+      - name: Validate
+        run: databricks bundle validate --target prod
+
+      - name: Deploy
+        run: databricks bundle deploy --target prod
+
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}

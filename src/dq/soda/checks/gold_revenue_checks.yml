@@ -1,0 +1,17 @@
+# =============================================================================
+# Soda Core checks — gold.daily_orders
+# =============================================================================
+# Business-level rules that protect downstream BI consumers.
+# =============================================================================
+
+checks for daily_orders:
+
+  - row_count > 0:
+      name: at least one daily aggregation must exist
+  - missing_count(order_date) = 0:
+      name: order_date must never be null
+  - invalid_count(order_count) = 0:
+      name: order_count must be non-negative
+      valid min: 0
+  - duplicate_count(order_date, order_status) = 0:
+      name: (order_date, order_status) must be the natural key

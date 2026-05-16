@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [develop]
+
+# Cancel older runs of the same branch when a new commit lands
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Lint & format checks — fast, runs first
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint (Ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install ruff==0.6.9
+      - run: ruff check .
+      - run: ruff format --check .
+
+  # ---------------------------------------------------------------------------
+  # Unit tests with pytest — Spark not required, fast
+  # ---------------------------------------------------------------------------
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: pytest tests/unit -v --cov=src --cov-report=term-missing
+
+  # ---------------------------------------------------------------------------
+  # Integration tests — local Spark, no Databricks needed
+  # ---------------------------------------------------------------------------
+  integration-tests:
+    name: Integration tests (local Spark)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[dev,spark]"
+      - run: pytest tests/integration -v
+
+  # ---------------------------------------------------------------------------
+  # Bundle validation — catches DABs config errors before they reach a workspace
+  # ---------------------------------------------------------------------------
+  bundle-validate:
+    name: Validate Databricks bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main
+      - name: Validate dev target
+        run: databricks bundle validate --target dev
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}

@@ -1,0 +1,37 @@
+# =============================================================================
+# Producer Job — simulates streaming arrival of Olist data
+# =============================================================================
+# Reads the static Olist CSVs from /Volumes/.../source and writes them in
+# date-partitioned micro-batches to /Volumes/.../landing, where Auto Loader
+# will pick them up. Runs on-demand or scheduled.
+# =============================================================================
+
+resources:
+  jobs:
+    olist_producer:
+      name: "[${bundle.target}] Olist Producer (Stream Replay)"
+
+      email_notifications:
+        on_failure:
+          - ${var.notifications_email}
+
+      tasks:
+        - task_key: replay_olist_to_landing
+          job_cluster_key: shared_cluster
+          spark_python_task:
+            python_file: ../../src/pipelines/producer/replay_olist.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--batch-size-days"
+              - "7"
+
+      job_clusters:
+        - job_cluster_key: shared_cluster
+          new_cluster:
+            spark_version: 15.4.x-scala2.12
+            node_type_id: Standard_DS3_v2   # Azure SKU; swap for AWS if needed
+            num_workers: 1
+            data_security_mode: SINGLE_USER
+            spark_conf:
+              spark.databricks.delta.preview.enabled: "true"

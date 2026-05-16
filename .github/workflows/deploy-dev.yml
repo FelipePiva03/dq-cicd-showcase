@@ -1,0 +1,33 @@
+name: Deploy → dev
+
+on:
+  push:
+    branches: [develop]
+
+# Don't deploy the same target twice in parallel
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy bundle to dev workspace
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main
+
+      - name: Validate
+        run: databricks bundle validate --target dev
+
+      - name: Deploy
+        run: databricks bundle deploy --target dev
+
+      - name: Smoke run — DQ validation only
+        run: databricks bundle run streaming_pipeline --target dev --only gx_validation_silver
+        continue-on-error: false
+
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}

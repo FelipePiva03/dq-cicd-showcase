@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.coverage
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+
+# Databricks
+.databricks/
+*.databricks/
+
+# Great Expectations local artifacts (regenerated each run)
+src/dq/great_expectations/uncommitted/
+src/dq/great_expectations/checkpoints/*.pickle
+
+# Soda
+.soda/
+
+# Data (never commit data — pull from Kaggle locally)
+data/raw/
+data/bronze/
+data/silver/
+data/gold/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
