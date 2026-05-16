@@ -178,7 +178,7 @@ def main() -> None:
 
     source_table = f"{args.catalog}.bronze.{args.table}"
     target_table = f"{args.catalog}.silver.fact_{args.table}"
-    checkpoint = f"/Volumes/{args.catalog}/_checkpoints/silver_fact_{args.table}"
+    checkpoint = f"/Volumes/{args.catalog}/_meta/checkpoints/silver_fact_{args.table}"
 
     spark.sql(f"CREATE SCHEMA IF NOT EXISTS {args.catalog}.silver")
 

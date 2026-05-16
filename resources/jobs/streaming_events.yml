@@ -1,0 +1,100 @@
+# =============================================================================
+# streaming_events — Bronze + Silver pipeline for the 4 event fact tables
+# =============================================================================
+# Consumes producer output from /Volumes/.../landing/events/{table}/ and
+# materializes bronze.{table} → silver.fact_{table} in 4 parallel chains.
+#
+# Topology (8 tasks total):
+#
+#     bronze_orders         ─┐
+#     bronze_order_items    ─┼─→ silver_<table> (each depends on its bronze)
+#     bronze_order_payments ─┤
+#     bronze_order_reviews  ─┘
+#
+# All 4 chains run in parallel; within each chain silver only starts after
+# the corresponding bronze finishes — which is what `availableNow=true`
+# already implies but the dependency makes it explicit in the run graph.
+#
+# DQ gate (GX checkpoint on silver) will be added in phase 4. Job is named
+# `streaming_events` so phase 5 just appends the gate task without renaming.
+#
+# Compute: serverless (Free Edition only allows serverless; also the right
+# default — each task is short-lived, no need to pay for cluster spin-up).
+# Schedule: every 5 minutes (production mode); disabled automatically in
+# DABs `development` mode (`mode: development` on the dev target).
+# =============================================================================
+
+resources:
+  jobs:
+    streaming_events:
+      name: "[${bundle.target}] Streaming events — Bronze + Silver"
+
+      email_notifications:
+        on_failure:
+          - ${var.notifications_email}
+
+      schedule:
+        quartz_cron_expression: "0 */5 * * * ?"   # every 5 min
+        timezone_id: "America/Sao_Paulo"
+        pause_status: "UNPAUSED"
+
+      tasks:
+        # ----- BRONZE: 4 parallel Auto Loader tasks ---------------------------
+        - task_key: bronze_orders
+          spark_python_task:
+            python_file: ../../src/pipelines/bronze/ingest_events.py
+            parameters: ["--catalog", "${var.catalog}", "--table", "orders"]
+          environment_key: default
+
+        - task_key: bronze_order_items
+          spark_python_task:
+            python_file: ../../src/pipelines/bronze/ingest_events.py
+            parameters: ["--catalog", "${var.catalog}", "--table", "order_items"]
+          environment_key: default
+
+        - task_key: bronze_order_payments
+          spark_python_task:
+            python_file: ../../src/pipelines/bronze/ingest_events.py
+            parameters: ["--catalog", "${var.catalog}", "--table", "order_payments"]
+          environment_key: default
+
+        - task_key: bronze_order_reviews
+          spark_python_task:
+            python_file: ../../src/pipelines/bronze/ingest_events.py
+            parameters: ["--catalog", "${var.catalog}", "--table", "order_reviews"]
+          environment_key: default
+
+        # ----- SILVER: 4 MERGEs, each depends on its bronze --------------------
+        - task_key: silver_orders
+          depends_on: [{ task_key: bronze_orders }]
+          spark_python_task:
+            python_file: ../../src/pipelines/silver/conform_fact.py
+            parameters: ["--catalog", "${var.catalog}", "--table", "orders"]
+          environment_key: default
+
+        - task_key: silver_order_items
+          depends_on: [{ task_key: bronze_order_items }]
+          spark_python_task:
+            python_file: ../../src/pipelines/silver/conform_fact.py
+            parameters: ["--catalog", "${var.catalog}", "--table", "order_items"]
+          environment_key: default
+
+        - task_key: silver_order_payments
+          depends_on: [{ task_key: bronze_order_payments }]
+          spark_python_task:
+            python_file: ../../src/pipelines/silver/conform_fact.py
+            parameters: ["--catalog", "${var.catalog}", "--table", "order_payments"]
+          environment_key: default
+
+        - task_key: silver_order_reviews
+          depends_on: [{ task_key: bronze_order_reviews }]
+          spark_python_task:
+            python_file: ../../src/pipelines/silver/conform_fact.py
+            parameters: ["--catalog", "${var.catalog}", "--table", "order_reviews"]
+          environment_key: default
+
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies: []

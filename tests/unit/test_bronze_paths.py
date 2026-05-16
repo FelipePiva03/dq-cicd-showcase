@@ -11,8 +11,8 @@ def test_paths_for_orders_catalog_dq_showcase_dev():
     p = paths_for("dq_showcase_dev", "orders")
     assert p == {
         "landing": "/Volumes/dq_showcase_dev/landing/events/orders",
-        "schema_location": "/Volumes/dq_showcase_dev/_schemas/bronze_orders",
-        "checkpoint": "/Volumes/dq_showcase_dev/_checkpoints/bronze_orders",
+        "schema_location": "/Volumes/dq_showcase_dev/_meta/cloudfiles/bronze_orders",
+        "checkpoint": "/Volumes/dq_showcase_dev/_meta/checkpoints/bronze_orders",
         "target_table": "dq_showcase_dev.bronze.orders",
     }
 

@@ -36,11 +36,17 @@ def parse_args() -> argparse.Namespace:
 
 
 def paths_for(catalog: str, table: str) -> dict[str, str]:
-    """Returns every storage path bronze ingestion needs for one table."""
+    """Returns every storage path bronze ingestion needs for one table.
+
+    Streaming-state lives under a single `_meta` schema (one for the whole
+    catalog) with two volumes — `cloudfiles` for Auto Loader schema metadata
+    and `checkpoints` for streaming offsets. Tables are kept apart by
+    subdirectory rather than by volume, so we don't proliferate volumes.
+    """
     return {
         "landing": f"/Volumes/{catalog}/landing/events/{table}",
-        "schema_location": f"/Volumes/{catalog}/_schemas/bronze_{table}",
-        "checkpoint": f"/Volumes/{catalog}/_checkpoints/bronze_{table}",
+        "schema_location": f"/Volumes/{catalog}/_meta/cloudfiles/bronze_{table}",
+        "checkpoint": f"/Volumes/{catalog}/_meta/checkpoints/bronze_{table}",
         "target_table": f"{catalog}.bronze.{table}",
     }
 
