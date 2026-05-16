@@ -55,6 +55,7 @@ ignore = ["E501"]  # line length handled by formatter
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+pythonpath = ["."]   # makes `from src.pipelines... import` work without `pip install -e .`
 markers = [
   "integration: requires local Spark session",
 ]

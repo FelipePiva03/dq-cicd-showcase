@@ -1,0 +1,26 @@
+# Local-only dev tooling. Not used by CI (GitHub Actions uses native runners).
+#
+# Common commands:
+#   docker compose run --rm test                              # all tests
+#   docker compose run --rm test pytest tests/unit -v         # unit only
+#   docker compose run --rm test pytest tests/integration -v  # integration only
+#   docker compose run --rm test ruff check .                 # lint
+#   docker compose build test                                 # rebuild after requirements.txt change
+
+services:
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    image: dq-cicd-showcase-test
+    volumes:
+      - .:/workspace
+      # Persist Ivy/Maven cache so Delta JARs aren't re-downloaded every run
+      - ivy-cache:/root/.ivy2
+      - m2-cache:/root/.m2
+    # Override CMD when you want a specific pytest invocation:
+    #   docker compose run --rm test pytest tests/integration/test_producer_replay.py -v
+
+volumes:
+  ivy-cache:
+  m2-cache:

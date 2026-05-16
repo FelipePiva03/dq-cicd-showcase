@@ -1,29 +1,33 @@
 # =============================================================================
-# Producer Job — simulates streaming arrival of Olist data
+# Producer Job — temporal replay of Olist event tables
 # =============================================================================
-# Reads the static Olist CSVs from /Volumes/.../source and writes them in
-# date-partitioned micro-batches to /Volumes/.../landing, where Auto Loader
-# will pick them up. Runs on-demand or scheduled.
+# Reads orders/items/payments/reviews from /Volumes/.../source/raw and drops
+# them into /Volumes/.../landing/events/{table}/batch_NNNN/ bucketed by each
+# row's effective timestamp. Auto Loader (streaming_events job) picks them
+# up from there.
+#
+# Runs on-demand only — this is "seed data" for dev/qa, not a recurring job.
+# In real production you'd swap this out for a CDC connector or a Kafka tap.
 # =============================================================================
 
 resources:
   jobs:
-    olist_producer:
-      name: "[${bundle.target}] Olist Producer (Stream Replay)"
+    producer_events:
+      name: "[${bundle.target}] Producer — Olist event replay"
 
       email_notifications:
         on_failure:
           - ${var.notifications_email}
 
       tasks:
-        - task_key: replay_olist_to_landing
+        - task_key: replay_olist_events
           job_cluster_key: shared_cluster
           spark_python_task:
             python_file: ../../src/pipelines/producer/replay_olist.py
             parameters:
               - "--catalog"
               - "${var.catalog}"
-              - "--batch-size-days"
+              - "--window-days"
               - "7"
 
       job_clusters:

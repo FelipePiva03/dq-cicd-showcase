@@ -1,0 +1,19 @@
+# Local dev requirements — mirrors [project.dependencies] +
+# [project.optional-dependencies] dev,spark in pyproject.toml.
+#
+# Use this when you don't want editable-install (`pip install -e .[dev,spark]`).
+# CI installs via pyproject extras; this file is for local convenience.
+
+# --- runtime ---
+great-expectations==0.18.19
+soda-core-spark-df==3.3.7
+delta-spark==3.2.0
+
+# --- dev ---
+pytest>=8.0
+pytest-cov>=5.0
+chispa>=0.10.1
+ruff==0.6.9
+
+# --- spark (local testing) ---
+pyspark==3.5.1

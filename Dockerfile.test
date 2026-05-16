@@ -1,0 +1,31 @@
+# =============================================================================
+# Test runner image — local PySpark/Delta tests without winutils pain on Windows
+# =============================================================================
+# Mirrors the GitHub Actions integration-tests job: Python 3.11 + Java 17.
+# Project is mounted at /workspace via docker-compose, so iteration is fast.
+# =============================================================================
+
+# Pinned to bookworm (Debian 12) — trixie/13 dropped openjdk-17,
+# and PySpark 3.5.1 is officially tested on JDK 8/11/17.
+FROM python:3.11-slim-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        openjdk-17-jre-headless \
+        procps \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 \
+    PATH="/usr/lib/jvm/java-17-openjdk-amd64/bin:${PATH}" \
+    PYSPARK_PYTHON=python \
+    PYSPARK_DRIVER_PYTHON=python \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /workspace
+
+# Install deps first — leverages Docker layer cache so code changes don't
+# trigger a full reinstall on every test run.
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Project files come in via the bind mount at runtime (see docker-compose.yml)
+CMD ["pytest", "tests/", "-v"]
