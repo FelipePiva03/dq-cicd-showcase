@@ -8,6 +8,10 @@
 #
 # Runs on-demand only — this is "seed data" for dev/qa, not a recurring job.
 # In real production you'd swap this out for a CDC connector or a Kafka tap.
+#
+# Compute: serverless (required on Databricks Free Edition; also the
+# right default for cost — short-lived task, no need to pay for cluster
+# spin-up).
 # =============================================================================
 
 resources:
@@ -21,7 +25,6 @@ resources:
 
       tasks:
         - task_key: replay_olist_events
-          job_cluster_key: shared_cluster
           spark_python_task:
             python_file: ../../src/pipelines/producer/replay_olist.py
             parameters:
@@ -29,13 +32,10 @@ resources:
               - "${var.catalog}"
               - "--window-days"
               - "7"
+          environment_key: default
 
-      job_clusters:
-        - job_cluster_key: shared_cluster
-          new_cluster:
-            spark_version: 15.4.x-scala2.12
-            node_type_id: Standard_DS3_v2   # Azure SKU; swap for AWS if needed
-            num_workers: 1
-            data_security_mode: SINGLE_USER
-            spark_conf:
-              spark.databricks.delta.preview.enabled: "true"
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"   # serverless compute client version (Spark 3.5 / DBR 15.x)
+            dependencies: []

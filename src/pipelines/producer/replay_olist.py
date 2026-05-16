@@ -78,10 +78,17 @@ def attach_effective_ts(
 
 
 def load_raw(spark: SparkSession, source_root: str, table: str) -> DataFrame:
+    """Reads one raw Olist CSV. multiLine + escape are mandatory for
+    `order_reviews` (free-text comments contain commas, quotes, and newlines
+    that otherwise bleed into adjacent columns and corrupt date parsing).
+    Applied to all tables — costs nothing on tables without multiline text.
+    """
     path = f"{source_root}/olist_{table}_dataset.csv"
     return (
         spark.read.option("header", "true")
         .option("inferSchema", "true")
+        .option("multiLine", "true")
+        .option("escape", '"')
         .csv(path)
     )
 
