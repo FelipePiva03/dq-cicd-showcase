@@ -34,9 +34,12 @@ resources:
           - ${var.notifications_email}
 
       schedule:
-        quartz_cron_expression: "0 */5 * * * ?"   # every 5 min
+        quartz_cron_expression: "0 */5 * * * ?"   # every 5 min (prod only)
         timezone_id: "America/Sao_Paulo"
-        pause_status: "UNPAUSED"
+        # pause_status intentionally omitted: DABs `mode: development`
+        # auto-pauses schedules in dev and leaves them unpaused in prod.
+        # Setting UNPAUSED here would override that and fire the cron in
+        # dev too — which surprised us with parallel runs once already.
 
       tasks:
         # ----- BRONZE: 4 parallel Auto Loader tasks ---------------------------

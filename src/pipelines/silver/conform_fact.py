@@ -38,12 +38,15 @@ NATURAL_KEYS: dict[str, list[str]] = {
 
 
 def conform_orders(df: DataFrame) -> DataFrame:
+    # try_to_timestamp (not to_timestamp): under ANSI mode (default on DBR 15+)
+    # a single malformed timestamp string fails the whole microbatch. try_*
+    # variants return null instead — the GX gate downstream catches them.
     return (
-        df.withColumn("order_purchase_timestamp", F.to_timestamp("order_purchase_timestamp"))
-        .withColumn("order_approved_at", F.to_timestamp("order_approved_at"))
-        .withColumn("order_delivered_carrier_date", F.to_timestamp("order_delivered_carrier_date"))
-        .withColumn("order_delivered_customer_date", F.to_timestamp("order_delivered_customer_date"))
-        .withColumn("order_estimated_delivery_date", F.to_timestamp("order_estimated_delivery_date"))
+        df.withColumn("order_purchase_timestamp", F.try_to_timestamp("order_purchase_timestamp"))
+        .withColumn("order_approved_at", F.try_to_timestamp("order_approved_at"))
+        .withColumn("order_delivered_carrier_date", F.try_to_timestamp("order_delivered_carrier_date"))
+        .withColumn("order_delivered_customer_date", F.try_to_timestamp("order_delivered_customer_date"))
+        .withColumn("order_estimated_delivery_date", F.try_to_timestamp("order_estimated_delivery_date"))
         .withColumn("order_status", F.lower(F.col("order_status")))
         .withColumn(
             "days_to_delivery",
@@ -68,10 +71,14 @@ def conform_orders(df: DataFrame) -> DataFrame:
 
 
 def conform_order_items(df: DataFrame) -> DataFrame:
+    # try_cast nulls bad inputs instead of throwing. DBR 15+ has ANSI mode
+    # ON by default, so a plain .cast() would fail the whole microbatch on
+    # one malformed row. Nulls are then visible to the GX gate downstream.
+    # PySpark 3.5 doesn't expose `F.try_cast` (added in 4.0) — use SQL form.
     return (
-        df.withColumn("price", F.col("price").cast("decimal(10,2)"))
-        .withColumn("freight_value", F.col("freight_value").cast("decimal(10,2)"))
-        .withColumn("shipping_limit_date", F.to_timestamp("shipping_limit_date"))
+        df.withColumn("price", F.expr("try_cast(price AS decimal(10,2))"))
+        .withColumn("freight_value", F.expr("try_cast(freight_value AS decimal(10,2))"))
+        .withColumn("shipping_limit_date", F.try_to_timestamp("shipping_limit_date"))
         .select(
             "order_id",
             "order_item_id",
@@ -88,7 +95,7 @@ def conform_order_items(df: DataFrame) -> DataFrame:
 def conform_order_payments(df: DataFrame) -> DataFrame:
     return (
         df.withColumn("payment_type", F.lower(F.col("payment_type")))
-        .withColumn("payment_value", F.col("payment_value").cast("decimal(10,2)"))
+        .withColumn("payment_value", F.expr("try_cast(payment_value AS decimal(10,2))"))
         .select(
             "order_id",
             "payment_sequential",
@@ -102,9 +109,9 @@ def conform_order_payments(df: DataFrame) -> DataFrame:
 
 def conform_order_reviews(df: DataFrame) -> DataFrame:
     return (
-        df.withColumn("review_creation_date", F.to_timestamp("review_creation_date"))
-        .withColumn("review_answer_timestamp", F.to_timestamp("review_answer_timestamp"))
-        .withColumn("review_score", F.col("review_score").cast("int"))
+        df.withColumn("review_creation_date", F.try_to_timestamp("review_creation_date"))
+        .withColumn("review_answer_timestamp", F.try_to_timestamp("review_answer_timestamp"))
+        .withColumn("review_score", F.expr("try_cast(review_score AS int)"))
         .select(
             "review_id",
             "order_id",
