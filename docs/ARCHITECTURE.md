@@ -109,17 +109,39 @@ That late arrival is the **whole reason streaming exists** in this project.
 A batch job that just reads all 4 CSVs once would never exercise
 `foreachBatch` MERGE semantics or watermarks.
 
-## DQ placement — GX vs Soda
+## DQ layers — quarantine, gates, and what each catches
 
-| Gate | Where | Tool | Why this tool here |
-|---|---|---|---|
-| Silver gate | After fact-table conform | **GX** | Structural checks (schema, nullability, regex, referential integrity to dims) — GX's expressiveness shines |
-| Silver gate | After dim conform | **Soda** | Simple uniqueness/freshness on small tables — Soda's YAML is ergonomic |
-| Gold gate | After agg marts | **Soda** | Business rules in analyst-readable YAML (`avg_revenue between 0 and 1e7`) |
+Three concentric defenses, each with a single job:
 
-The split deliberately exercises **both** tools on the same project so the
-comparison in [`docs/COMPARISON.md`](COMPARISON.md) reflects real usage,
-not synthetic toy checks.
+| Layer | Catches | Failure mode |
+|---|---|---|
+| **Quarantine (silver pre-MERGE)** | Structural integrity — null PK, null FK to required dim, value unparseable after `try_cast` | Bad rows routed to `quarantine.fact_*` with `_quarantine_reason`; silver stays clean; pipeline continues |
+| **GX gate (silver post-MERGE)** | Business semantics — `days_to_delivery >= 0`, `review_score BETWEEN 1 AND 5`, status enums | Suite fails → downstream gold blocked; silver retains the run, GX results persisted to `dq.run_results` |
+| **Soda gate (gold post-marts)** | Aggregate invariants — `avg_revenue between 0 and 1e7`, `on_time_rate ∈ [0,1]` | Mart fails → consumers (BI, alerts) see stale data, not bad data |
+
+**Why split hard vs soft rules?** Hard rules protect silver's *shape*
+(typed columns, MERGE keys present); soft rules protect downstream
+*meaning* (revenue makes sense, scores in range). Conflating them in one
+gate forces a binary choice: either fail everything on a single null
+order_id, or let silver accept structurally broken rows. The split lets
+us keep ingesting while quarantining noise.
+
+**GX vs Soda — why both?** GX's Python expressiveness fits the
+structural+regex-heavy silver checks; Soda's YAML is ergonomic for the
+business-rule gold checks an analyst can read and edit. The split is
+deliberate so the comparison in [`docs/COMPARISON.md`](COMPARISON.md)
+reflects real usage, not synthetic toy checks.
+
+### Known source data quirk: Olist CSV escaping
+
+The Olist `order_reviews` CSV escapes embedded quotes inconsistently
+(`""` in some rows, `"""` in others). Even with `multiLine=true` +
+`escape='"'`, the CSV parser misaligns columns on those rows — comment
+text leaks into `review_id` and `order_id`. **This is not a pipeline
+bug, it's source-data reality.** Quarantine catches every misparsed row
+via `review_score_unparseable` or `order_id_null`. Silver only ever sees
+well-formed records. A "data engineer hero fix" (pre-cleaning the CSV
+in the producer) would just hide the problem from the dashboard later.
 
 ## Idempotency story
 
