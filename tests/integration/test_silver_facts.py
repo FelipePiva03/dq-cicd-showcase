@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 from chispa import assert_column_equality
 
 from src.pipelines.silver.conform_fact import (
     CONFORMERS,
+    HARD_RULES,
     NATURAL_KEYS,
     conform_order_items,
     conform_order_payments,
     conform_order_reviews,
     conform_orders,
     dedupe_by_key,
+    split_quarantine,
 )
 
 
@@ -129,7 +133,7 @@ def test_dedupe_handles_composite_key(spark):
 # ---------------------------------------------------------------------------
 # Module-level contract tests (no Spark)
 # ---------------------------------------------------------------------------
-def test_every_event_table_has_conformer_and_keys():
+def test_every_event_table_has_conformer_keys_and_hard_rules():
     """If a new event table is added to EVENT_TABLES, the missing
     entry here points right at the gap."""
     from src.pipelines.silver.conform_fact import EVENT_TABLES
@@ -137,4 +141,67 @@ def test_every_event_table_has_conformer_and_keys():
     for t in EVENT_TABLES:
         assert t in CONFORMERS, f"{t} missing from CONFORMERS"
         assert t in NATURAL_KEYS, f"{t} missing from NATURAL_KEYS"
+        assert t in HARD_RULES, f"{t} missing from HARD_RULES"
         assert len(NATURAL_KEYS[t]) >= 1
+
+
+# ---------------------------------------------------------------------------
+# quarantine split — the safety net that keeps silver clean
+# ---------------------------------------------------------------------------
+@pytest.mark.integration
+def test_split_quarantine_separates_null_pk_from_silver(spark):
+    """Rows with null natural key go to quarantine with the reason tagged.
+    Valid rows pass through untouched."""
+    conformed = spark.createDataFrame(
+        [
+            ("o1", "c1", "delivered", None, None, None, None, None, None),
+            (None, "c2", "delivered", None, None, None, None, None, None),
+        ],
+        "order_id string, customer_id string, order_status string, "
+        "order_purchase_timestamp timestamp, order_approved_at timestamp, "
+        "order_delivered_carrier_date timestamp, "
+        "order_delivered_customer_date timestamp, "
+        "order_estimated_delivery_date timestamp, days_to_delivery int",
+    )
+
+    valid, quarantined = split_quarantine(conformed, "orders")
+    valid_ids = [r.order_id for r in valid.collect()]
+    quar_rows = quarantined.collect()
+
+    # o1 has the null purchase_ts, which fires `purchase_ts_unparseable`
+    # before reaching the order_id null check. Both rows actually quarantine.
+    assert "o1" not in valid_ids
+    assert all(r._quarantine_reason is not None for r in quar_rows)
+
+
+@pytest.mark.integration
+def test_split_quarantine_keeps_clean_rows(spark):
+    """Rows that pass every hard rule must NOT carry a _quarantine_reason
+    column (it's dropped on the valid side)."""
+    conformed = spark.createDataFrame(
+        [("o1", 1, "p1", "s1", None, Decimal("50.00"), Decimal("10.00"), None)],
+        "order_id string, order_item_id int, product_id string, seller_id string, "
+        "shipping_limit_date timestamp, price decimal(10,2), "
+        "freight_value decimal(10,2), _silver_processed_ts timestamp",
+    )
+    valid, quarantined = split_quarantine(conformed, "order_items")
+
+    assert valid.count() == 1
+    assert quarantined.count() == 0
+    assert "_quarantine_reason" not in valid.columns
+
+
+@pytest.mark.integration
+def test_split_quarantine_reason_names_specific_rule(spark):
+    """When `price IS NULL` (try_cast nulled an unparseable string),
+    the reason must be `price_unparseable` — not a generic message."""
+    conformed = spark.createDataFrame(
+        [("o1", 1, "p1", "s1", None, None, Decimal("10.00"), None)],
+        "order_id string, order_item_id int, product_id string, seller_id string, "
+        "shipping_limit_date timestamp, price decimal(10,2), "
+        "freight_value decimal(10,2), _silver_processed_ts timestamp",
+    )
+    _, quarantined = split_quarantine(conformed, "order_items")
+    row = quarantined.first()
+    assert row._quarantine_reason == "price_unparseable"
+    assert row._quarantine_ts is not None
