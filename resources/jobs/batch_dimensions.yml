@@ -1,0 +1,116 @@
+# =============================================================================
+# batch_dimensions — Bronze + Silver SCD1 for the 5 dimension tables
+# =============================================================================
+# Topology (10 tasks, 5 parallel chains):
+#
+#     bronze_dim_customer    ─→ silver_dim_customer
+#     bronze_dim_product     ─→ silver_dim_product
+#     bronze_dim_seller      ─→ silver_dim_seller
+#     bronze_dim_geolocation ─→ silver_dim_geolocation
+#     bronze_dim_category    ─→ silver_dim_category
+#
+# Cadence: daily 04:00 America/Sao_Paulo (auto-paused in dev by DABs
+# `mode: development`). Dims are slow-changing master data — overnight
+# is the right beat, not every-5-min like streaming_events.
+#
+# Why a different job (not lumped into streaming_events):
+#   - Different cadence (daily vs 5-min) → would over- or under-trigger
+#   - Different failure surface (dim refresh failing doesn't have to block
+#     event ingestion)
+#   - Cleaner Workflows graph in the UI
+#
+# Soda gate on these dims will be added in phase 7 — job name stays
+# `batch_dimensions` so phase 7 just appends gate tasks.
+#
+# Compute: serverless (Free Edition; also right for cost — each task is
+# short, no spin-up tax).
+# =============================================================================
+
+resources:
+  jobs:
+    batch_dimensions:
+      name: "[${bundle.target}] Batch dimensions — Bronze + Silver SCD1"
+
+      email_notifications:
+        on_failure:
+          - ${var.notifications_email}
+
+      schedule:
+        quartz_cron_expression: "0 0 4 * * ?"   # daily 04:00 (prod only)
+        timezone_id: "America/Sao_Paulo"
+        # pause_status intentionally omitted: DABs `mode: development`
+        # auto-pauses in dev, leaves unpaused in prod.
+
+      tasks:
+        # ----- BRONZE: 5 parallel batch loads --------------------------------
+        - task_key: bronze_dim_customer
+          spark_python_task:
+            python_file: ../../src/pipelines/bronze/load_dim.py
+            parameters: ["--catalog", "${var.catalog}", "--table", "customer"]
+          environment_key: default
+
+        - task_key: bronze_dim_product
+          spark_python_task:
+            python_file: ../../src/pipelines/bronze/load_dim.py
+            parameters: ["--catalog", "${var.catalog}", "--table", "product"]
+          environment_key: default
+
+        - task_key: bronze_dim_seller
+          spark_python_task:
+            python_file: ../../src/pipelines/bronze/load_dim.py
+            parameters: ["--catalog", "${var.catalog}", "--table", "seller"]
+          environment_key: default
+
+        - task_key: bronze_dim_geolocation
+          spark_python_task:
+            python_file: ../../src/pipelines/bronze/load_dim.py
+            parameters: ["--catalog", "${var.catalog}", "--table", "geolocation"]
+          environment_key: default
+
+        - task_key: bronze_dim_category
+          spark_python_task:
+            python_file: ../../src/pipelines/bronze/load_dim.py
+            parameters: ["--catalog", "${var.catalog}", "--table", "category"]
+          environment_key: default
+
+        # ----- SILVER: SCD1 MERGE, each depends on its bronze ----------------
+        - task_key: silver_dim_customer
+          depends_on: [{ task_key: bronze_dim_customer }]
+          spark_python_task:
+            python_file: ../../src/pipelines/silver/conform_dim.py
+            parameters: ["--catalog", "${var.catalog}", "--table", "customer"]
+          environment_key: default
+
+        - task_key: silver_dim_product
+          depends_on: [{ task_key: bronze_dim_product }]
+          spark_python_task:
+            python_file: ../../src/pipelines/silver/conform_dim.py
+            parameters: ["--catalog", "${var.catalog}", "--table", "product"]
+          environment_key: default
+
+        - task_key: silver_dim_seller
+          depends_on: [{ task_key: bronze_dim_seller }]
+          spark_python_task:
+            python_file: ../../src/pipelines/silver/conform_dim.py
+            parameters: ["--catalog", "${var.catalog}", "--table", "seller"]
+          environment_key: default
+
+        - task_key: silver_dim_geolocation
+          depends_on: [{ task_key: bronze_dim_geolocation }]
+          spark_python_task:
+            python_file: ../../src/pipelines/silver/conform_dim.py
+            parameters: ["--catalog", "${var.catalog}", "--table", "geolocation"]
+          environment_key: default
+
+        - task_key: silver_dim_category
+          depends_on: [{ task_key: bronze_dim_category }]
+          spark_python_task:
+            python_file: ../../src/pipelines/silver/conform_dim.py
+            parameters: ["--catalog", "${var.catalog}", "--table", "category"]
+          environment_key: default
+
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies: []
