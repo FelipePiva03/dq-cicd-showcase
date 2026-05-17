@@ -55,9 +55,9 @@ def main() -> None:
     _persist_results(spark, args.catalog, scan.get_scan_results())
 
     if scan.has_check_fails():
-        print(f"[soda] ❌ scan {args.checks_file} FAILED")
+        print(f"[soda] scan {args.checks_file} FAILED")
         sys.exit(1)
-    print(f"[soda] ✅ scan {args.checks_file} passed")
+    print(f"[soda] scan {args.checks_file} passed")
 
 
 def _persist_results(spark: SparkSession, catalog: str, payload: dict) -> None:
@@ -66,9 +66,7 @@ def _persist_results(spark: SparkSession, catalog: str, payload: dict) -> None:
         [(datetime.utcnow(), "soda_core", str(payload))],
         "run_ts timestamp, tool string, payload string",
     )
-    (
-        df.write.format("delta").mode("append").saveAsTable(f"{catalog}.dq.run_results")
-    )
+    (df.write.format("delta").mode("append").saveAsTable(f"{catalog}.dq.run_results"))
 
 
 if __name__ == "__main__":

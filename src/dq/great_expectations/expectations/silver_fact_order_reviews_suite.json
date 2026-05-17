@@ -1,0 +1,28 @@
+{
+  "name": "silver_fact_order_reviews_suite",
+  "meta": {
+    "comment": "Business-rule gate for silver.fact_order_reviews. Quarantine already drops rows with null PK, null order_id, or unparseable review_score."
+  },
+  "expectations": [
+    {
+      "type": "ExpectColumnValuesToBeUnique",
+      "kwargs": { "column": "review_id" },
+      "meta": { "severity": "critical", "rationale": "duplicate review would inflate review-volume metrics in gold" }
+    },
+    {
+      "type": "ExpectColumnValuesToBeBetween",
+      "kwargs": { "column": "review_score", "min_value": 1, "max_value": 5 },
+      "meta": { "severity": "critical", "rationale": "review_score out of [1,5] breaks the avg-rating metric in gold" }
+    },
+    {
+      "type": "ExpectColumnPairValuesAToBeGreaterThanB",
+      "kwargs": {
+        "column_A": "review_answer_timestamp",
+        "column_B": "review_creation_date",
+        "or_equal": true,
+        "ignore_row_if": "either_value_is_missing"
+      },
+      "meta": { "severity": "warning", "rationale": "answer-before-creation is suspicious but happens in source; not fatal for gold" }
+    }
+  ]
+}

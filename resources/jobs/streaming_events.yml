@@ -1,33 +1,39 @@
 # =============================================================================
-# streaming_events — Bronze + Silver pipeline for the 4 event fact tables
+# streaming_events — Bronze + Silver + GX gate for the 4 event fact tables
 # =============================================================================
 # Consumes producer output from /Volumes/.../landing/events/{table}/ and
-# materializes bronze.{table} → silver.fact_{table} in 4 parallel chains.
+# materializes bronze.{table} → silver.fact_{table} → GX validation in 4
+# parallel chains.
 #
-# Topology (8 tasks total):
+# Topology (12 tasks total):
 #
-#     bronze_orders         ─┐
-#     bronze_order_items    ─┼─→ silver_<table> (each depends on its bronze)
-#     bronze_order_payments ─┤
-#     bronze_order_reviews  ─┘
+#     bronze_orders         ─→ silver_orders         ─→ gx_validation_orders
+#     bronze_order_items    ─→ silver_order_items    ─→ gx_validation_order_items
+#     bronze_order_payments ─→ silver_order_payments ─→ gx_validation_order_payments
+#     bronze_order_reviews  ─→ silver_order_reviews  ─→ gx_validation_order_reviews
 #
-# All 4 chains run in parallel; within each chain silver only starts after
-# the corresponding bronze finishes — which is what `availableNow=true`
-# already implies but the dependency makes it explicit in the run graph.
+# All 4 chains run in parallel; within each chain a stage starts only after
+# the previous stage's task succeeds (explicit `depends_on`).
 #
-# DQ gate (GX checkpoint on silver) will be added in phase 4. Job is named
-# `streaming_events` so phase 5 just appends the gate task without renaming.
+# GX gate uses tiered severity: a critical expectation failure exits 1 and
+# blocks the chain; a warning failure logs + persists results and continues.
+# See src/dq/great_expectations/run_checkpoint.py and the per-table suites.
 #
 # Compute: serverless (Free Edition only allows serverless; also the right
 # default — each task is short-lived, no need to pay for cluster spin-up).
-# Schedule: every 5 minutes (production mode); disabled automatically in
-# DABs `development` mode (`mode: development` on the dev target).
+# Two environments:
+#   - `default`   for bronze + silver (no extra deps)
+#   - `gx`        for the 4 GX validation tasks (installs great-expectations)
+# Splitting keeps bronze/silver task startup lean.
+#
+# Schedule: every 5 minutes (production mode); auto-paused in dev by DABs
+# `mode: development` (pause_status omitted intentionally).
 # =============================================================================
 
 resources:
   jobs:
     streaming_events:
-      name: "[${bundle.target}] Streaming events — Bronze + Silver"
+      name: "[${bundle.target}] Streaming events — Bronze + Silver + GX"
 
       email_notifications:
         on_failure:
@@ -36,10 +42,6 @@ resources:
       schedule:
         quartz_cron_expression: "0 */5 * * * ?"   # every 5 min (prod only)
         timezone_id: "America/Sao_Paulo"
-        # pause_status intentionally omitted: DABs `mode: development`
-        # auto-pauses schedules in dev and leaves them unpaused in prod.
-        # Setting UNPAUSED here would override that and fire the cron in
-        # dev too — which surprised us with parallel runs once already.
 
       tasks:
         # ----- BRONZE: 4 parallel Auto Loader tasks ---------------------------
@@ -96,8 +98,67 @@ resources:
             parameters: ["--catalog", "${var.catalog}", "--table", "order_reviews"]
           environment_key: default
 
+        # ----- GX GATE: 4 validations, each depends on its silver --------------
+        - task_key: gx_validation_orders
+          depends_on: [{ task_key: silver_orders }]
+          spark_python_task:
+            python_file: ../../src/dq/great_expectations/run_checkpoint.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--table"
+              - "orders"
+              - "--suite-dir"
+              - "${workspace.file_path}/src/dq/great_expectations/expectations"
+          environment_key: gx
+
+        - task_key: gx_validation_order_items
+          depends_on: [{ task_key: silver_order_items }]
+          spark_python_task:
+            python_file: ../../src/dq/great_expectations/run_checkpoint.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--table"
+              - "order_items"
+              - "--suite-dir"
+              - "${workspace.file_path}/src/dq/great_expectations/expectations"
+          environment_key: gx
+
+        - task_key: gx_validation_order_payments
+          depends_on: [{ task_key: silver_order_payments }]
+          spark_python_task:
+            python_file: ../../src/dq/great_expectations/run_checkpoint.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--table"
+              - "order_payments"
+              - "--suite-dir"
+              - "${workspace.file_path}/src/dq/great_expectations/expectations"
+          environment_key: gx
+
+        - task_key: gx_validation_order_reviews
+          depends_on: [{ task_key: silver_order_reviews }]
+          spark_python_task:
+            python_file: ../../src/dq/great_expectations/run_checkpoint.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--table"
+              - "order_reviews"
+              - "--suite-dir"
+              - "${workspace.file_path}/src/dq/great_expectations/expectations"
+          environment_key: gx
+
       environments:
         - environment_key: default
           spec:
             client: "2"
             dependencies: []
+
+        - environment_key: gx
+          spec:
+            client: "2"
+            dependencies:
+              - great-expectations==1.5.6

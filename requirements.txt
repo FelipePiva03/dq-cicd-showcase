@@ -5,7 +5,7 @@
 # CI installs via pyproject extras; this file is for local convenience.
 
 # --- runtime ---
-great-expectations==0.18.19
+great-expectations==1.5.6
 soda-core-spark-df==3.3.7
 delta-spark==3.2.0
 

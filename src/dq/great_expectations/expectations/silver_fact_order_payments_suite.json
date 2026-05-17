@@ -1,0 +1,36 @@
+{
+  "name": "silver_fact_order_payments_suite",
+  "meta": {
+    "comment": "Business-rule gate for silver.fact_order_payments. Composite PK (order_id, payment_sequential). Quarantine already drops rows with null PK or unparseable payment_value."
+  },
+  "expectations": [
+    {
+      "type": "ExpectCompoundColumnsToBeUnique",
+      "kwargs": { "column_list": ["order_id", "payment_sequential"] },
+      "meta": { "severity": "critical", "rationale": "duplicate payment row would inflate total revenue in gold" }
+    },
+    {
+      "type": "ExpectColumnValuesToBeInSet",
+      "kwargs": {
+        "column": "payment_type",
+        "value_set": ["credit_card", "boleto", "voucher", "debit_card", "not_defined"]
+      },
+      "meta": { "severity": "critical", "rationale": "unknown payment_type breaks gold breakdowns by method" }
+    },
+    {
+      "type": "ExpectColumnValuesToBeBetween",
+      "kwargs": { "column": "payment_value", "min_value": 0, "max_value": 100000 },
+      "meta": { "severity": "critical", "rationale": "negative or absurd payment value corrupts gold revenue totals" }
+    },
+    {
+      "type": "ExpectColumnValuesToBeBetween",
+      "kwargs": {
+        "column": "payment_installments",
+        "min_value": 0,
+        "max_value": 24,
+        "mostly": 0.999
+      },
+      "meta": { "severity": "warning", "rationale": "0 installments valid for boleto/voucher; 24 is Brazilian credit-card max; rare outliers tolerated" }
+    }
+  ]
+}
