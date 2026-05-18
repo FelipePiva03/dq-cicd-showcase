@@ -10,8 +10,9 @@
 > (Olist), with **Data Quality gates** between every layer and a full
 > **CI/CD lifecycle** powered by **Databricks Asset Bundles** + GitHub Actions.
 >
-> Built to compare **Great Expectations vs. Soda Core** side by side on the
-> same business rules — see [`docs/COMPARISON.md`](docs/COMPARISON.md).
+> Uses **Great Expectations** as the silver-fact gate (tiered critical/warning)
+> and **Soda Core** as the silver-dim and gold-mart gates — each tool used
+> where it fits best for the layer's failure mode.
 
 ---
 
@@ -19,55 +20,66 @@
 
 | Capability | Where to look |
 |---|---|
-| **Structured Streaming + Auto Loader** | [`src/pipelines/bronze/ingest_orders.py`](src/pipelines/bronze/ingest_orders.py) |
-| **`foreachBatch` + MERGE INTO Delta** | [`src/pipelines/silver/transform_orders.py`](src/pipelines/silver/transform_orders.py) |
+| **Structured Streaming + Auto Loader** | [`src/pipelines/bronze/ingest_events.py`](src/pipelines/bronze/ingest_events.py) |
+| **`foreachBatch` + MERGE INTO Delta (facts)** | [`src/pipelines/silver/conform_fact.py`](src/pipelines/silver/conform_fact.py) |
+| **SCD1 MERGE on dimensions** | [`src/pipelines/silver/conform_dim.py`](src/pipelines/silver/conform_dim.py) |
+| **Quarantine pre-MERGE for hard violations** | [`src/pipelines/silver/conform_fact.py`](src/pipelines/silver/conform_fact.py) (`HARD_RULES`, `split_quarantine`) |
 | **Databricks Asset Bundles (dev + prod targets)** | [`databricks.yml`](databricks.yml), [`resources/jobs/`](resources/jobs/) |
-| **GX as a DQ gate task** | [`src/dq/great_expectations/`](src/dq/great_expectations/) |
-| **Soda Core as a DQ gate task** | [`src/dq/soda/`](src/dq/soda/) |
+| **GX gate (silver facts, tiered critical/warning)** | [`src/dq/great_expectations/`](src/dq/great_expectations/) |
+| **Soda gate (silver dims + gold marts)** | [`src/dq/soda/`](src/dq/soda/) |
 | **3-stage CI/CD on GitHub Actions** | [`.github/workflows/`](.github/workflows/) |
 | **Pytest unit + integration tests with chispa** | [`tests/`](tests/) |
-| **Side-by-side GX vs Soda comparison** | [`docs/COMPARISON.md`](docs/COMPARISON.md) |
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-                  ┌────────────────────────┐
-                  │  Olist CSVs (Kaggle)   │
-                  └───────────┬────────────┘
-                              │  producer job (replay)
-                              ▼
-                  ┌────────────────────────┐
-                  │  /Volumes/landing/...  │
-                  └───────────┬────────────┘
-                              │  Auto Loader (cloudFiles)
-                              ▼
-                  ┌────────────────────────┐
-                  │   bronze.orders        │   append-only Delta
-                  └───────────┬────────────┘
-                              │  readStream + foreachBatch MERGE
-                              ▼
-                  ┌────────────────────────┐
-                  │   silver.orders        │   conformed, deduped
-                  └───────────┬────────────┘
-                              │
-                ┌─────────────┴─────────────┐
-                │  🛡️ GX checkpoint (gate)  │   ← fails the job on regression
-                └─────────────┬─────────────┘
-                              ▼
-                  ┌────────────────────────┐
-                  │   gold.daily_orders    │
-                  │   gold.delivery_perf   │
-                  └───────────┬────────────┘
-                              │
-                ┌─────────────┴─────────────┐
-                │  🛡️ Soda scan (gate)      │   ← fails the job on regression
-                └─────────────┬─────────────┘
-                              ▼
-                  ┌────────────────────────┐
-                  │   dq.run_results       │   ← powers DQ dashboard
-                  └────────────────────────┘
+        ┌──────────────────────┐
+        │  Olist CSVs (Kaggle) │
+        └──────────┬───────────┘
+                   │ producer (temporal replay)
+                   ▼
+        ┌──────────────────────┐
+        │ /Volumes/landing/... │
+        └──────────┬───────────┘
+                   │ Auto Loader (events) / COPY INTO (dims)
+                   ▼
+        ┌────────────────────────────────┐
+        │  bronze.fact_*   bronze.dim_*  │  append-only Delta
+        └──────────┬─────────────┬───────┘
+                   │             │
+   readStream      │             │  batch MERGE (SCD1)
+   foreachBatch    │             │
+   MERGE           ▼             ▼
+        ┌──────────────────┐ ┌──────────────────┐
+        │ 🛡️ quarantine   │ │                  │
+        │   (HARD_RULES)  │ │  silver.dim_*    │
+        └──────────┬──────┘ └─────────┬────────┘
+                   ▼                  │
+        ┌──────────────────┐          │
+        │  silver.fact_*   │          │
+        └──────────┬───────┘          │
+                   │                  │
+        ┌──────────┴───────┐          │
+        │ 🛡️ GX gate       │ tiered  │
+        │ (critical/warn)  │          │
+        └──────────┬───────┘          │
+                   │  ┌───────────────┘
+                   │  │  🛡️ Soda gate (dims)
+                   ▼  ▼
+        ┌────────────────────────┐
+        │  gold.daily_orders     │
+        │  gold.delivery_perf    │
+        └──────────┬─────────────┘
+                   │
+        ┌──────────┴───────┐
+        │ 🛡️ Soda gate     │  gold mart invariants
+        └──────────┬───────┘
+                   ▼
+        ┌────────────────────────┐
+        │   dq.run_results       │  scan results (Delta append)
+        └────────────────────────┘
 ```
 
 DQ gates are **separate job tasks** with `depends_on`, so the failure
@@ -135,7 +147,7 @@ databricks bundle validate --target dev
 databricks bundle deploy --target dev
 
 # Run a specific job
-databricks bundle run streaming_pipeline --target dev
+databricks bundle run streaming_events --target dev
 ```
 
 ### Loading the dataset
@@ -161,15 +173,15 @@ databricks bundle run streaming_pipeline --target dev
 | Auto Loader instead of Kafka | Kafka was overkill for a static dataset replay; Auto Loader is the Databricks-native pattern |
 | `foreachBatch` + MERGE on Silver | Order status updates require idempotent upserts, not appends |
 | DQ as separate job tasks | Failure points are visible in the run timeline, not buried in logs |
-| GX **and** Soda | Comparison is the point of the showcase; trade-offs are the takeaway |
+| GX on facts, Soda on dims+marts | GX's Python flexibility fits cross-column fact checks; Soda's YAML fits analyst-readable dim/mart invariants |
+| Quarantine pre-MERGE, gates post-MERGE | Hard structural failures shouldn't poison silver; soft business failures should block downstream |
 | DABs instead of "deploy notebooks" | IaC, multi-env for free, source-of-truth in Git |
 
 ---
 
 ## 📚 Further reading
 
-- [`docs/COMPARISON.md`](docs/COMPARISON.md) — the GX vs Soda field comparison
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — deeper architectural decisions
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — three-layer DQ defense and deeper rationale
 - [`docs/DABS_GUIDE.md`](docs/DABS_GUIDE.md) — DABs configuration walkthrough
 
 ---
