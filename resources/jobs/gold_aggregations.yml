@@ -1,0 +1,79 @@
+# =============================================================================
+# gold_aggregations — Silver → Gold marts + Soda gate
+# =============================================================================
+# Topology (2 tasks):
+#
+#     gold_aggregate_revenue ─→ soda_validation_gold
+#
+# `aggregate_revenue.py` reads silver.orders and writes both
+# `gold.daily_orders` (count by date + status) and
+# `gold.delivery_performance` (weekly avg/p95 days_to_delivery). Soda then
+# validates both marts in one scan via the parametrized run_scan.py
+# (--tables takes a comma list, --checks-file routes to gold_revenue_checks.yml).
+#
+# Cadence: nightly 05:00 America/Sao_Paulo — runs *after* the streaming events
+# job (every 5 min) and *after* batch_dimensions (04:00 daily), so gold reads
+# the freshest silver of the day. Cross-job dependency is purely time-based —
+# DABs has no built-in cross-job depends_on, and for marts that recompute
+# from full silver scans, a time-based barrier is sufficient.
+#
+# Why a separate job (not appended to streaming_events):
+#   - Different cadence (nightly vs 5-min) — appending would over-trigger gold
+#   - Gold needs both fact + dim silver to be settled; coupling it to either
+#     upstream job would make the other a hidden dep
+#
+# Compute: serverless. Single gold env carries soda-core since the gate is
+# the only post-aggregation task here.
+# =============================================================================
+
+resources:
+  jobs:
+    gold_aggregations:
+      name: "[${bundle.target}] Gold aggregations — Silver→Gold + Soda gate"
+
+      email_notifications:
+        on_failure:
+          - ${var.notifications_email}
+
+      schedule:
+        quartz_cron_expression: "0 0 5 * * ?"   # daily 05:00 (prod only)
+        timezone_id: "America/Sao_Paulo"
+        # pause_status intentionally omitted: DABs `mode: development`
+        # auto-pauses in dev, leaves unpaused in prod.
+
+      tasks:
+        # ----- AGGREGATION: silver.orders → 2 gold marts --------------------
+        - task_key: gold_aggregate_revenue
+          spark_python_task:
+            python_file: ../../src/pipelines/gold/aggregate_revenue.py
+            parameters: ["--catalog", "${var.catalog}"]
+          environment_key: default
+
+        # ----- SODA GATE: scan both gold tables in one pass -----------------
+        - task_key: soda_validation_gold
+          depends_on:
+            - { task_key: gold_aggregate_revenue }
+          spark_python_task:
+            python_file: ../../src/dq/soda/run_scan.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--checks-file"
+              - "gold_revenue_checks.yml"
+              - "--checks-dir"
+              - "${workspace.file_path}/src/dq/soda/checks"
+              - "--tables"
+              - "gold.daily_orders,gold.delivery_performance"
+          environment_key: soda
+
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies: []
+
+        - environment_key: soda
+          spec:
+            client: "2"
+            dependencies:
+              - soda-core-spark-df==3.5.6
