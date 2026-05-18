@@ -35,8 +35,7 @@ def fake_olist(tmp_path: Path) -> Path:
     )
     _write_csv(
         raw / "olist_order_items_dataset.csv",
-        "order_id,order_item_id,product_id,seller_id,shipping_limit_date,"
-        "price,freight_value",
+        "order_id,order_item_id,product_id,seller_id,shipping_limit_date," "price,freight_value",
         [
             "o1,1,p1,s1,2024-01-04 00:00:00,50.00,10.00",
             "o2,1,p2,s2,2024-01-22 00:00:00,80.00,12.00",
@@ -68,11 +67,13 @@ def test_review_uses_review_creation_date_not_purchase_ts(spark, fake_olist):
     """Reviews must bucket by review_creation_date so they appear later
     than the parent order — that's the whole point of using streaming."""
     reviews = (
-        spark.read.option("header", "true").option("inferSchema", "true")
+        spark.read.option("header", "true")
+        .option("inferSchema", "true")
         .csv(str(fake_olist / "olist_order_reviews_dataset.csv"))
     )
     orders = (
-        spark.read.option("header", "true").option("inferSchema", "true")
+        spark.read.option("header", "true")
+        .option("inferSchema", "true")
         .csv(str(fake_olist / "olist_orders_dataset.csv"))
     )
 
@@ -88,11 +89,13 @@ def test_items_inherit_parent_order_timestamp(spark, fake_olist):
     """order_items must inherit their parent order's purchase timestamp,
     since items don't have their own event time."""
     items = (
-        spark.read.option("header", "true").option("inferSchema", "true")
+        spark.read.option("header", "true")
+        .option("inferSchema", "true")
         .csv(str(fake_olist / "olist_order_items_dataset.csv"))
     )
     orders = (
-        spark.read.option("header", "true").option("inferSchema", "true")
+        spark.read.option("header", "true")
+        .option("inferSchema", "true")
         .csv(str(fake_olist / "olist_orders_dataset.csv"))
     )
 

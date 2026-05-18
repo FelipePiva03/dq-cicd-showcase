@@ -40,7 +40,6 @@ import great_expectations.expectations as gxe
 from great_expectations.core.expectation_suite import ExpectationSuite
 from pyspark.sql import SparkSession
 
-
 FACT_TABLES = ("orders", "order_items", "order_payments", "order_reviews")
 DEFAULT_SUITE_DIR = Path("src/dq/great_expectations/expectations")
 
@@ -53,8 +52,8 @@ def parse_args() -> argparse.Namespace:
         "--suite-dir",
         default=str(DEFAULT_SUITE_DIR),
         help="Directory containing silver_fact_*_suite.json files. "
-             "Default is bundle-root-relative; on Databricks pass the "
-             "absolute path via ${workspace.file_path}/...",
+        "Default is bundle-root-relative; on Databricks pass the "
+        "absolute path via ${workspace.file_path}/...",
     )
     return parser.parse_args()
 
@@ -187,8 +186,12 @@ def main() -> None:
 
     critical, warning = classify_failures(result)
     persist_results(
-        spark, args.catalog, args.table,
-        result.to_json_dict(), len(critical), len(warning),
+        spark,
+        args.catalog,
+        args.table,
+        result.to_json_dict(),
+        len(critical),
+        len(warning),
     )
 
     if warning:

@@ -36,8 +36,8 @@ from __future__ import annotations
 import argparse
 
 from delta.tables import DeltaTable
-from pyspark.sql import DataFrame, SparkSession, Window, functions as F
-
+from pyspark.sql import DataFrame, SparkSession, Window
+from pyspark.sql import functions as F
 
 EVENT_TABLES = ("orders", "order_items", "order_payments", "order_reviews")
 
@@ -98,9 +98,15 @@ def conform_orders(df: DataFrame) -> DataFrame:
     return (
         df.withColumn("order_purchase_timestamp", F.try_to_timestamp("order_purchase_timestamp"))
         .withColumn("order_approved_at", F.try_to_timestamp("order_approved_at"))
-        .withColumn("order_delivered_carrier_date", F.try_to_timestamp("order_delivered_carrier_date"))
-        .withColumn("order_delivered_customer_date", F.try_to_timestamp("order_delivered_customer_date"))
-        .withColumn("order_estimated_delivery_date", F.try_to_timestamp("order_estimated_delivery_date"))
+        .withColumn(
+            "order_delivered_carrier_date", F.try_to_timestamp("order_delivered_carrier_date")
+        )
+        .withColumn(
+            "order_delivered_customer_date", F.try_to_timestamp("order_delivered_customer_date")
+        )
+        .withColumn(
+            "order_estimated_delivery_date", F.try_to_timestamp("order_estimated_delivery_date")
+        )
         .withColumn("order_status", F.lower(F.col("order_status")))
         .withColumn(
             "days_to_delivery",
@@ -186,9 +192,7 @@ CONFORMERS = {
 # ---------------------------------------------------------------------------
 # Shared transforms: dedupe + quarantine split
 # ---------------------------------------------------------------------------
-def dedupe_by_key(
-    df: DataFrame, keys: list[str], order_col: str = "_ingestion_ts"
-) -> DataFrame:
+def dedupe_by_key(df: DataFrame, keys: list[str], order_col: str = "_ingestion_ts") -> DataFrame:
     """Keeps the latest row per natural key (ordered by `order_col` desc).
 
     Required before MERGE: without it, a microbatch with multiple rows for
@@ -198,9 +202,7 @@ def dedupe_by_key(
     return df.withColumn("_rn", F.row_number().over(w)).filter("_rn = 1").drop("_rn")
 
 
-def split_quarantine(
-    df: DataFrame, table: str
-) -> tuple[DataFrame, DataFrame]:
+def split_quarantine(df: DataFrame, table: str) -> tuple[DataFrame, DataFrame]:
     """Splits a conformed DF into (valid_rows, quarantined_rows).
 
     Quarantined rows keep the silver schema plus two metadata columns:
@@ -209,9 +211,8 @@ def split_quarantine(
     """
     tagged = df.withColumn("_quarantine_reason", F.expr(HARD_RULES[table]))
     valid = tagged.filter("_quarantine_reason IS NULL").drop("_quarantine_reason")
-    quarantined = (
-        tagged.filter("_quarantine_reason IS NOT NULL")
-        .withColumn("_quarantine_ts", F.current_timestamp())
+    quarantined = tagged.filter("_quarantine_reason IS NOT NULL").withColumn(
+        "_quarantine_ts", F.current_timestamp()
     )
     return valid, quarantined
 

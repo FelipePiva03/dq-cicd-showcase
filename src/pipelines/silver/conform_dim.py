@@ -27,8 +27,8 @@ from __future__ import annotations
 import argparse
 
 from delta.tables import DeltaTable
-from pyspark.sql import DataFrame, SparkSession, functions as F
-
+from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import functions as F
 
 DIM_TABLES = ("customer", "product", "seller", "geolocation", "category")
 
@@ -136,9 +136,8 @@ def split_quarantine(df: DataFrame, table: str) -> tuple[DataFrame, DataFrame]:
     """Splits a conformed dim DF into (valid, quarantined) using HARD_RULES."""
     tagged = df.withColumn("_quarantine_reason", F.expr(HARD_RULES[table]))
     valid = tagged.filter("_quarantine_reason IS NULL").drop("_quarantine_reason")
-    quarantined = (
-        tagged.filter("_quarantine_reason IS NOT NULL")
-        .withColumn("_quarantine_ts", F.current_timestamp())
+    quarantined = tagged.filter("_quarantine_reason IS NOT NULL").withColumn(
+        "_quarantine_ts", F.current_timestamp()
     )
     return valid, quarantined
 

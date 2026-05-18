@@ -27,10 +27,26 @@ from src.pipelines.silver.conform_fact import (
 def test_conform_orders_normalizes_status_and_computes_days_to_delivery(spark):
     raw = spark.createDataFrame(
         [
-            ("o1", "c1", "DELIVERED", "2024-01-01 10:00:00", "2024-01-01 11:00:00",
-             "2024-01-02 09:00:00", "2024-01-05 14:00:00", "2024-01-10 00:00:00"),
-            ("o2", "c2", "Shipped", "2024-02-01 09:00:00", "2024-02-01 09:30:00",
-             "2024-02-02 10:00:00", None, "2024-02-15 00:00:00"),
+            (
+                "o1",
+                "c1",
+                "DELIVERED",
+                "2024-01-01 10:00:00",
+                "2024-01-01 11:00:00",
+                "2024-01-02 09:00:00",
+                "2024-01-05 14:00:00",
+                "2024-01-10 00:00:00",
+            ),
+            (
+                "o2",
+                "c2",
+                "Shipped",
+                "2024-02-01 09:00:00",
+                "2024-02-01 09:30:00",
+                "2024-02-02 10:00:00",
+                None,
+                "2024-02-15 00:00:00",
+            ),
         ],
         "order_id string, customer_id string, order_status string, "
         "order_purchase_timestamp string, order_approved_at string, "
@@ -103,8 +119,8 @@ def test_conform_order_reviews_casts_score_and_timestamps(spark):
 def test_dedupe_keeps_latest_ingestion_per_key(spark):
     raw = spark.createDataFrame(
         [
-            ("o1", "shipped",   "2024-01-01 10:00:00"),
-            ("o1", "delivered", "2024-01-02 10:00:00"),   # winner — newer
+            ("o1", "shipped", "2024-01-01 10:00:00"),
+            ("o1", "delivered", "2024-01-02 10:00:00"),  # winner — newer
             ("o2", "delivered", "2024-01-02 10:00:00"),
         ],
         "order_id string, order_status string, _ingestion_ts string",
@@ -121,7 +137,7 @@ def test_dedupe_handles_composite_key(spark):
         [
             ("o1", 1, "old_product", "2024-01-01 10:00:00"),
             ("o1", 1, "new_product", "2024-01-02 10:00:00"),  # winner
-            ("o1", 2, "other",       "2024-01-01 10:00:00"),  # different key, stays
+            ("o1", 2, "other", "2024-01-01 10:00:00"),  # different key, stays
         ],
         "order_id string, order_item_id int, product_id string, _ingestion_ts string",
     )

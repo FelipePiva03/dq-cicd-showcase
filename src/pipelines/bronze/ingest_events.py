@@ -22,8 +22,8 @@ from __future__ import annotations
 
 import argparse
 
-from pyspark.sql import SparkSession, functions as F
-
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
 
 EVENT_TABLES = ("orders", "order_items", "order_payments", "order_reviews")
 

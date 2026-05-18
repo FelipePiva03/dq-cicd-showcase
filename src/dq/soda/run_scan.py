@@ -31,7 +31,6 @@ from pathlib import Path
 from pyspark.sql import SparkSession
 from soda.scan import Scan
 
-
 DEFAULT_CHECKS_DIR = Path("src/dq/soda/checks")
 
 
@@ -43,13 +42,13 @@ def parse_args() -> argparse.Namespace:
         "--checks-dir",
         default=str(DEFAULT_CHECKS_DIR),
         help="Directory containing the checks YAML. Bundle-root-relative; on "
-             "Databricks pass the absolute path via ${workspace.file_path}/...",
+        "Databricks pass the absolute path via ${workspace.file_path}/...",
     )
     parser.add_argument(
         "--tables",
         required=True,
         help="Comma-separated `schema.table` list (catalog implicit). Each "
-             "is registered as a temp view named after the last path component.",
+        "is registered as a temp view named after the last path component.",
     )
     return parser.parse_args()
 
@@ -98,9 +97,7 @@ def main() -> None:
         print(f"[soda] {args.checks_file} passed cleanly")
 
 
-def _persist_results(
-    spark: SparkSession, catalog: str, checks_file: str, payload: dict
-) -> None:
+def _persist_results(spark: SparkSession, catalog: str, checks_file: str, payload: dict) -> None:
     """Appends Soda scan results to the shared DQ telemetry table."""
     spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog}.dq")
     df = spark.createDataFrame(

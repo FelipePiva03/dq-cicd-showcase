@@ -80,7 +80,10 @@ def test_conform_geolocation_collapses_to_one_row_per_zip(spark):
 @pytest.mark.integration
 def test_split_quarantine_isolates_null_pk(spark):
     conformed = spark.createDataFrame(
-        [("c1", "u1", "14409", "Franca", "SP", None), (None, "u2", "01037", "Sao Paulo", "SP", None)],
+        [
+            ("c1", "u1", "14409", "Franca", "SP", None),
+            (None, "u2", "01037", "Sao Paulo", "SP", None),
+        ],
         "customer_id string, customer_unique_id string, customer_zip_code_prefix string, "
         "customer_city string, customer_state string, _silver_processed_ts timestamp",
     )
