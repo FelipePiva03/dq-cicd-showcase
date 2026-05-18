@@ -58,10 +58,10 @@ resources:
             parameters:
               - "--catalog"
               - "${var.catalog}"
-              - "--checks-file"
-              - "gold_revenue_checks.yml"
-              - "--checks-dir"
-              - "${workspace.file_path}/src/dq/soda/checks"
+              - "--scan-name"
+              - "gold_marts"
+              - "--contracts-dir"
+              - "${workspace.file_path}/contracts"
               - "--tables"
               - "gold.daily_orders,gold.delivery_performance"
           environment_key: soda

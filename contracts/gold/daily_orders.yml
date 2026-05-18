@@ -1,0 +1,48 @@
+# =============================================================================
+# Data contract — gold.daily_orders
+# =============================================================================
+# Daily aggregation of orders by date + status. Natural key: (order_date, order_status).
+# =============================================================================
+version: 1
+
+metadata:
+  catalog_schema: gold
+  table: daily_orders
+  owner: analytics
+  description: Order count per day per status. Wide mart for daily-orders dashboards.
+  cadence: nightly-05h
+  natural_key: [order_date, order_status]
+
+schema:
+  - {name: order_date,   type: date,   nullable: false}
+  - {name: order_status, type: string, nullable: false}
+  - {name: order_count,  type: long,   nullable: false}
+
+quality:
+  # Gold marts don't quarantine — input silver is already cleaned. Hard rules
+  # omitted intentionally.
+
+  expectations:
+    - id: row_count_not_empty
+      severity: critical
+      rationale: at least one daily aggregation must exist
+      type: ExpectTableRowCountToBeBetween
+      kwargs: {min_value: 1}
+
+    - id: order_date_not_null
+      severity: critical
+      rationale: order_date is part of the natural key — never null
+      type: ExpectColumnValuesToNotBeNull
+      kwargs: {column: order_date}
+
+    - id: order_count_non_negative
+      severity: critical
+      rationale: aggregated count cannot be negative
+      type: ExpectColumnValuesToBeBetween
+      kwargs: {column: order_count, min_value: 0}
+
+    - id: natural_key_unique
+      severity: critical
+      rationale: (order_date, order_status) must be unique — that's the grain
+      type: ExpectCompoundColumnsToBeUnique
+      kwargs: {column_list: [order_date, order_status]}

@@ -35,13 +35,16 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+# Make `src/` importable for Databricks spark_python_task.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 import great_expectations as gx
-import great_expectations.expectations as gxe
-from great_expectations.core.expectation_suite import ExpectationSuite
 from pyspark.sql import SparkSession
 
+from dq.contracts import load_contract, to_gx_suite
+
 FACT_TABLES = ("orders", "order_items", "order_payments", "order_reviews")
-DEFAULT_SUITE_DIR = Path("src/dq/great_expectations/expectations")
+DEFAULT_CONTRACTS_DIR = Path("contracts")
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,53 +52,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--catalog", required=True)
     parser.add_argument("--table", required=True, choices=FACT_TABLES)
     parser.add_argument(
-        "--suite-dir",
-        default=str(DEFAULT_SUITE_DIR),
-        help="Directory containing silver_fact_*_suite.json files. "
-        "Default is bundle-root-relative; on Databricks pass the "
-        "absolute path via ${workspace.file_path}/...",
+        "--contracts-dir",
+        default=str(DEFAULT_CONTRACTS_DIR),
+        help="Root directory of `contracts/{layer}/{table}.yml` files. "
+        "Default is bundle-root-relative; on Databricks pass the absolute "
+        "path via ${workspace.file_path}/contracts.",
     )
     return parser.parse_args()
-
-
-def load_suite(table: str, suite_dir: Path | str = DEFAULT_SUITE_DIR) -> ExpectationSuite:
-    """Loads the JSON suite for one fact table into a GX 1.x ExpectationSuite.
-
-    JSON shape (1.x native):
-        {
-          "name": "silver_fact_orders_suite",
-          "meta": {...},
-          "expectations": [
-            {
-              "type": "ExpectColumnValuesToBeUnique",   ← class name in gxe
-              "kwargs": {"column": "order_id"},
-              "meta": {"severity": "critical", "rationale": "..."}
-            },
-            ...
-          ]
-        }
-
-    GX 1.x requires an active context before instantiating ExpectationSuite
-    or Expectation objects, so we ensure one exists (ephemeral if missing).
-    Callers can register the returned suite into their own context.
-
-    The JSON file is the source of truth — checked into git, reviewable by
-    analysts, no runtime mutation.
-    """
-    # Ensure GX context is active — required for Expectation construction in 1.x
-    gx.get_context(mode="ephemeral")
-
-    path = Path(suite_dir) / f"silver_fact_{table}_suite.json"
-    data = json.loads(path.read_text(encoding="utf-8"))
-
-    suite = ExpectationSuite(name=data["name"], meta=data.get("meta", {}))
-    for exp_data in data["expectations"]:
-        cls_name = exp_data["type"]
-        cls = getattr(gxe, cls_name)
-        kwargs = dict(exp_data["kwargs"])
-        expectation = cls(**kwargs, meta=exp_data.get("meta", {}))
-        suite.add_expectation(expectation)
-    return suite
 
 
 def classify_failures(result) -> tuple[list[dict], list[dict]]:
@@ -166,7 +129,8 @@ def main() -> None:
     print(f"[gx] validating {silver_table}")
     silver_df = spark.read.table(silver_table)
 
-    suite = load_suite(args.table, args.suite_dir)
+    contract = load_contract("silver", f"fact_{args.table}", args.contracts_dir)
+    suite = to_gx_suite(contract)
 
     # GX 1.x fluent API — no YAML, no checkpoint config, no ephemeral persist.
     context = gx.get_context(mode="ephemeral")

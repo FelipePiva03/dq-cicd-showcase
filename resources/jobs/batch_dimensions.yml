@@ -122,10 +122,10 @@ resources:
             parameters:
               - "--catalog"
               - "${var.catalog}"
-              - "--checks-file"
-              - "silver_dims_checks.yml"
-              - "--checks-dir"
-              - "${workspace.file_path}/src/dq/soda/checks"
+              - "--scan-name"
+              - "silver_dims"
+              - "--contracts-dir"
+              - "${workspace.file_path}/contracts"
               - "--tables"
               - "silver.dim_customer,silver.dim_product,silver.dim_seller,silver.dim_geolocation,silver.dim_category"
           environment_key: soda

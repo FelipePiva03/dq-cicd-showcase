@@ -1,0 +1,49 @@
+# =============================================================================
+# run_all — end-to-end orchestrator (demo / smoke-test only)
+# =============================================================================
+# Chains the 4 production jobs into one button using `run_job_task`:
+#
+#     producer_events ─→ streaming_events ─┐
+#                     └→ batch_dimensions ─┴→ gold_aggregations
+#
+# Existence of this job does NOT collapse the architecture into one job —
+# each underlying job still owns its own cadence, schedule, and failure
+# surface (see docs/ARCHITECTURE.md "Why 4 jobs (not 1)"). This is purely
+# a convenience entry point for:
+#   - first-time end-to-end smoke after `bundle deploy --target dev`
+#   - CI smoke (deploy-dev.yml) — `databricks bundle run run_all`
+#   - portfolio demo — "show me the whole pipeline in one click"
+#
+# Not scheduled. Manual trigger only.
+# =============================================================================
+
+resources:
+  jobs:
+    run_all:
+      name: "[${bundle.target}] Run all — end-to-end orchestrator"
+
+      email_notifications:
+        on_failure:
+          - ${var.notifications_email}
+
+      tasks:
+        - task_key: trigger_producer
+          run_job_task:
+            job_id: ${resources.jobs.producer_events.id}
+
+        - task_key: trigger_streaming
+          depends_on: [{ task_key: trigger_producer }]
+          run_job_task:
+            job_id: ${resources.jobs.streaming_events.id}
+
+        - task_key: trigger_batch_dims
+          depends_on: [{ task_key: trigger_producer }]
+          run_job_task:
+            job_id: ${resources.jobs.batch_dimensions.id}
+
+        - task_key: trigger_gold
+          depends_on:
+            - { task_key: trigger_streaming }
+            - { task_key: trigger_batch_dims }
+          run_job_task:
+            job_id: ${resources.jobs.gold_aggregations.id}

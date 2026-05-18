@@ -1,0 +1,66 @@
+# =============================================================================
+# Data contract — silver.fact_order_items
+# =============================================================================
+version: 1
+
+metadata:
+  catalog_schema: silver
+  table: fact_order_items
+  owner: data-platform
+  description: Conformed order-item facts. Composite PK (order_id, order_item_id).
+  cadence: streaming-5m
+  natural_key: [order_id, order_item_id]
+
+schema:
+  - {name: order_id,             type: string,         nullable: false}
+  - {name: order_item_id,        type: int,            nullable: false}
+  - {name: product_id,           type: string,         nullable: false}
+  - {name: seller_id,            type: string,         nullable: false}
+  - {name: shipping_limit_date,  type: timestamp}
+  - {name: price,                type: "decimal(10,2)", nullable: false}
+  - {name: freight_value,        type: "decimal(10,2)"}
+  - {name: _silver_processed_ts, type: timestamp,      nullable: false}
+
+quality:
+  hard_rules:
+    - {reason: order_id_null,      condition: "order_id IS NULL"}
+    - {reason: order_item_id_null, condition: "order_item_id IS NULL"}
+    - {reason: product_id_null,    condition: "product_id IS NULL"}
+    - {reason: price_unparseable,  condition: "price IS NULL"}
+
+  expectations:
+    - id: compound_pk_unique
+      severity: critical
+      rationale: composite PK duplication would double-count items in gold revenue/volume marts
+      type: ExpectCompoundColumnsToBeUnique
+      kwargs: {column_list: [order_id, order_item_id]}
+
+    - id: order_item_id_plausible
+      severity: warning
+      rationale: Olist max items per order in dataset is ~20; >100 indicates parsing drift
+      type: ExpectColumnValuesToBeBetween
+      kwargs: {column: order_item_id, min_value: 1, max_value: 100}
+
+    - id: price_plausible
+      severity: critical
+      rationale: negative price or absurd value breaks revenue math in gold
+      type: ExpectColumnValuesToBeBetween
+      kwargs: {column: price, min_value: 0, max_value: 100000}
+
+    - id: freight_plausible
+      severity: warning
+      rationale: freight outliers are rare anomalies, not pipeline failures
+      type: ExpectColumnValuesToBeBetween
+      kwargs: {column: freight_value, min_value: 0, max_value: 10000, mostly: 0.999}
+
+    - id: seller_id_not_null
+      severity: critical
+      rationale: null seller breaks the join to dim_seller in gold
+      type: ExpectColumnValuesToNotBeNull
+      kwargs: {column: seller_id}
+
+    - id: shipping_limit_present
+      severity: warning
+      rationale: occasional nulls accepted; mostly threshold flags systemic issue
+      type: ExpectColumnValuesToNotBeNull
+      kwargs: {column: shipping_limit_date, mostly: 0.99}

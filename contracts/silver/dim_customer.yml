@@ -1,0 +1,45 @@
+# =============================================================================
+# Data contract — silver.dim_customer
+# =============================================================================
+version: 1
+
+metadata:
+  catalog_schema: silver
+  table: dim_customer
+  owner: data-platform
+  description: SCD1 customer dimension.
+  cadence: daily-04h
+  natural_key: [customer_id]
+
+schema:
+  - {name: customer_id,              type: string, nullable: false}
+  - {name: customer_unique_id,       type: string}
+  - {name: customer_zip_code_prefix, type: string}
+  - {name: customer_city,            type: string}
+  - {name: customer_state,           type: string}
+  - {name: _silver_processed_ts,     type: timestamp, nullable: false}
+
+quality:
+  hard_rules:
+    - {reason: customer_id_null, condition: "customer_id IS NULL"}
+
+  expectations:
+    - id: customer_id_unique
+      severity: critical
+      rationale: customer_id must be unique post-MERGE
+      type: ExpectColumnValuesToBeUnique
+      kwargs: {column: customer_id}
+
+    - id: row_count_not_empty
+      severity: critical
+      rationale: empty dim_customer means upstream broke
+      type: ExpectTableRowCountToBeBetween
+      kwargs: {min_value: 1}
+
+    - id: customer_state_valid
+      severity: warning
+      rationale: customer_state must be a valid Brazilian state code
+      type: ExpectColumnValuesToBeInSet
+      kwargs:
+        column: customer_state
+        value_set: [AC, AL, AM, AP, BA, CE, DF, ES, GO, MA, MG, MS, MT, PA, PB, PE, PI, PR, RJ, RN, RO, RR, RS, SC, SE, SP, TO]

@@ -1,0 +1,44 @@
+# =============================================================================
+# Data contract — silver.dim_seller
+# =============================================================================
+version: 1
+
+metadata:
+  catalog_schema: silver
+  table: dim_seller
+  owner: data-platform
+  description: SCD1 seller dimension.
+  cadence: daily-04h
+  natural_key: [seller_id]
+
+schema:
+  - {name: seller_id,              type: string, nullable: false}
+  - {name: seller_zip_code_prefix, type: string}
+  - {name: seller_city,            type: string}
+  - {name: seller_state,           type: string}
+  - {name: _silver_processed_ts,   type: timestamp, nullable: false}
+
+quality:
+  hard_rules:
+    - {reason: seller_id_null, condition: "seller_id IS NULL"}
+
+  expectations:
+    - id: seller_id_unique
+      severity: critical
+      rationale: seller_id must be unique post-MERGE
+      type: ExpectColumnValuesToBeUnique
+      kwargs: {column: seller_id}
+
+    - id: row_count_not_empty
+      severity: critical
+      rationale: empty dim_seller means upstream broke
+      type: ExpectTableRowCountToBeBetween
+      kwargs: {min_value: 1}
+
+    - id: seller_state_valid
+      severity: warning
+      rationale: seller_state must be a valid Brazilian state code
+      type: ExpectColumnValuesToBeInSet
+      kwargs:
+        column: seller_state
+        value_set: [AC, AL, AM, AP, BA, CE, DF, ES, GO, MA, MG, MS, MT, PA, PB, PE, PI, PR, RJ, RN, RO, RR, RS, SC, SE, SP, TO]

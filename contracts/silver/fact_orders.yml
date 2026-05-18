@@ -1,0 +1,87 @@
+# =============================================================================
+# Data contract — silver.fact_orders
+# =============================================================================
+# Source of truth for: schema, structural rules (quarantine), business rules
+# (GX gate). The conform pipeline and the GX runner both load from this file.
+# =============================================================================
+
+version: 1
+
+metadata:
+  catalog_schema: silver
+  table: fact_orders
+  owner: data-platform
+  description: Conformed order facts. One row per order_id post-MERGE.
+  cadence: streaming-5m
+  natural_key: [order_id]
+
+schema:
+  - {name: order_id,                       type: string,    nullable: false}
+  - {name: customer_id,                    type: string,    nullable: false}
+  - {name: order_status,                   type: string,    nullable: false}
+  - {name: order_purchase_timestamp,       type: timestamp, nullable: false}
+  - {name: order_approved_at,              type: timestamp}
+  - {name: order_delivered_carrier_date,   type: timestamp}
+  - {name: order_delivered_customer_date,  type: timestamp}
+  - {name: order_estimated_delivery_date,  type: timestamp}
+  - {name: days_to_delivery,               type: int}
+  - {name: _silver_processed_ts,           type: timestamp, nullable: false}
+
+quality:
+
+  # Hard rules: evaluated pre-MERGE by split_quarantine(). Bad rows go to
+  # quarantine.fact_orders with `_quarantine_reason = <reason>`.
+  # First matching rule wins (order matters).
+  hard_rules:
+    - {reason: order_id_null,             condition: "order_id IS NULL"}
+    - {reason: customer_id_null,          condition: "customer_id IS NULL"}
+    - {reason: order_status_null,         condition: "order_status IS NULL"}
+    - {reason: purchase_ts_unparseable,   condition: "order_purchase_timestamp IS NULL"}
+
+  # Business expectations: evaluated post-MERGE by the GX gate.
+  expectations:
+    - id: order_id_unique
+      severity: critical
+      rationale: duplicate order_id would double-count revenue in gold marts
+      type: ExpectColumnValuesToBeUnique
+      kwargs: {column: order_id}
+
+    - id: order_status_in_set
+      severity: critical
+      rationale: unknown status breaks gold delivery_performance filters
+      type: ExpectColumnValuesToBeInSet
+      kwargs:
+        column: order_status
+        value_set: [delivered, shipped, canceled, unavailable, invoiced, processing, created, approved]
+
+    - id: days_to_delivery_plausible
+      severity: warning
+      rationale: stat anomaly — 1% tail tolerated (mostly skips nulls); doesn't break gold
+      type: ExpectColumnValuesToBeBetween
+      kwargs: {column: days_to_delivery, min_value: 0, max_value: 90, mostly: 0.99}
+
+    - id: delivery_after_purchase
+      severity: warning
+      rationale: negative delivery time is suspicious but rare; quarantine catches the structural case
+      type: ExpectColumnPairValuesAToBeGreaterThanB
+      kwargs:
+        column_A: order_delivered_customer_date
+        column_B: order_purchase_timestamp
+        or_equal: true
+        ignore_row_if: either_value_is_missing
+
+    - id: approval_after_purchase
+      severity: warning
+      rationale: approved-before-purchase is impossible by definition; if seen, it's source corruption
+      type: ExpectColumnPairValuesAToBeGreaterThanB
+      kwargs:
+        column_A: order_approved_at
+        column_B: order_purchase_timestamp
+        or_equal: true
+        ignore_row_if: either_value_is_missing
+
+    - id: row_count_plausible
+      severity: critical
+      rationale: empty silver means upstream pipeline broke
+      type: ExpectTableRowCountToBeBetween
+      kwargs: {min_value: 1, max_value: 10000000}

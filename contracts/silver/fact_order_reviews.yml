@@ -1,0 +1,49 @@
+# =============================================================================
+# Data contract — silver.fact_order_reviews
+# =============================================================================
+version: 1
+
+metadata:
+  catalog_schema: silver
+  table: fact_order_reviews
+  owner: data-platform
+  description: Conformed review facts. One row per review_id.
+  cadence: streaming-5m
+  natural_key: [review_id]
+
+schema:
+  - {name: review_id,               type: string,    nullable: false}
+  - {name: order_id,                type: string,    nullable: false}
+  - {name: review_score,            type: int,       nullable: false}
+  - {name: review_creation_date,    type: timestamp}
+  - {name: review_answer_timestamp, type: timestamp}
+  - {name: _silver_processed_ts,    type: timestamp, nullable: false}
+
+quality:
+  hard_rules:
+    - {reason: review_id_null,           condition: "review_id IS NULL"}
+    - {reason: order_id_null,            condition: "order_id IS NULL"}
+    - {reason: review_score_unparseable, condition: "review_score IS NULL"}
+
+  expectations:
+    - id: review_id_unique
+      severity: critical
+      rationale: duplicate review would inflate review-volume metrics in gold
+      type: ExpectColumnValuesToBeUnique
+      kwargs: {column: review_id}
+
+    - id: review_score_in_range
+      severity: critical
+      rationale: review_score out of [1,5] breaks the avg-rating metric in gold
+      type: ExpectColumnValuesToBeBetween
+      kwargs: {column: review_score, min_value: 1, max_value: 5}
+
+    - id: answer_after_creation
+      severity: warning
+      rationale: answer-before-creation is suspicious but happens in source; not fatal for gold
+      type: ExpectColumnPairValuesAToBeGreaterThanB
+      kwargs:
+        column_A: review_answer_timestamp
+        column_B: review_creation_date
+        or_equal: true
+        ignore_row_if: either_value_is_missing

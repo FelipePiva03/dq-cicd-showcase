@@ -34,58 +34,38 @@ Hard rule vs soft rule:
 from __future__ import annotations
 
 import argparse
+import sys
+from functools import cache
+from pathlib import Path
+
+# Make `src/` importable so `from dq.contracts import ...` works whether the
+# script runs via pytest (pythonpath=".") or as a Databricks spark_python_task
+# (which only adds the script's own directory to sys.path).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from delta.tables import DeltaTable
 from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
 
+from dq.contracts import load_contract, to_hard_rules_case
+
 EVENT_TABLES = ("orders", "order_items", "order_payments", "order_reviews")
 
-NATURAL_KEYS: dict[str, list[str]] = {
-    "orders": ["order_id"],
-    "order_items": ["order_id", "order_item_id"],
-    "order_payments": ["order_id", "payment_sequential"],
-    "order_reviews": ["review_id"],
-}
 
-# CASE expression per table. Returns the rule name if violated, NULL if clean.
-# Order matters: first matching WHEN wins, so list most-critical rules first.
-HARD_RULES: dict[str, str] = {
-    "orders": """
-        CASE
-            WHEN order_id IS NULL                 THEN 'order_id_null'
-            WHEN customer_id IS NULL              THEN 'customer_id_null'
-            WHEN order_status IS NULL             THEN 'order_status_null'
-            WHEN order_purchase_timestamp IS NULL THEN 'purchase_ts_unparseable'
-            ELSE NULL
-        END
-    """,
-    "order_items": """
-        CASE
-            WHEN order_id IS NULL      THEN 'order_id_null'
-            WHEN order_item_id IS NULL THEN 'order_item_id_null'
-            WHEN product_id IS NULL    THEN 'product_id_null'
-            WHEN price IS NULL         THEN 'price_unparseable'
-            ELSE NULL
-        END
-    """,
-    "order_payments": """
-        CASE
-            WHEN order_id IS NULL           THEN 'order_id_null'
-            WHEN payment_sequential IS NULL THEN 'payment_sequential_null'
-            WHEN payment_value IS NULL      THEN 'payment_value_unparseable'
-            ELSE NULL
-        END
-    """,
-    "order_reviews": """
-        CASE
-            WHEN review_id IS NULL    THEN 'review_id_null'
-            WHEN order_id IS NULL     THEN 'order_id_null'
-            WHEN review_score IS NULL THEN 'review_score_unparseable'
-            ELSE NULL
-        END
-    """,
-}
+@cache
+def _contract(table: str):
+    """Load the silver/fact_{table} contract once per process."""
+    return load_contract("silver", f"fact_{table}")
+
+
+def natural_key(table: str) -> list[str]:
+    """Natural key for the fact table, from its contract."""
+    return _contract(table).natural_key
+
+
+def hard_rules_case(table: str) -> str:
+    """SQL CASE expression for split_quarantine(), generated from the contract."""
+    return to_hard_rules_case(_contract(table))
 
 
 # ---------------------------------------------------------------------------
@@ -206,10 +186,10 @@ def split_quarantine(df: DataFrame, table: str) -> tuple[DataFrame, DataFrame]:
     """Splits a conformed DF into (valid_rows, quarantined_rows).
 
     Quarantined rows keep the silver schema plus two metadata columns:
-    `_quarantine_reason` (which HARD_RULES rule fired) and
+    `_quarantine_reason` (which contract hard_rule fired) and
     `_quarantine_ts` (wall-clock when the row was rejected).
     """
-    tagged = df.withColumn("_quarantine_reason", F.expr(HARD_RULES[table]))
+    tagged = df.withColumn("_quarantine_reason", F.expr(hard_rules_case(table)))
     valid = tagged.filter("_quarantine_reason IS NULL").drop("_quarantine_reason")
     quarantined = tagged.filter("_quarantine_reason IS NOT NULL").withColumn(
         "_quarantine_ts", F.current_timestamp()
@@ -227,7 +207,7 @@ def upsert_to_silver(
     table_name: str,
 ):
     """foreachBatch callback: dedupe → conform → split → MERGE valid + APPEND quarantine."""
-    keys = NATURAL_KEYS[table_name]
+    keys = natural_key(table_name)
     conform_fn = CONFORMERS[table_name]
     merge_condition = " AND ".join(f"t.{k} = s.{k}" for k in keys)
 

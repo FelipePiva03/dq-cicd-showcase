@@ -1,0 +1,54 @@
+# =============================================================================
+# Data contract — silver.dim_product
+# =============================================================================
+version: 1
+
+metadata:
+  catalog_schema: silver
+  table: dim_product
+  owner: data-platform
+  description: SCD1 product dimension. Note Olist source has typos
+    `name_lenght`/`description_lenght` preserved as-is.
+  cadence: daily-04h
+  natural_key: [product_id]
+
+schema:
+  - {name: product_id,                  type: string, nullable: false}
+  - {name: product_category_name,       type: string}
+  - {name: product_name_lenght,         type: int}
+  - {name: product_description_lenght,  type: int}
+  - {name: product_photos_qty,          type: int}
+  - {name: product_weight_g,            type: int}
+  - {name: product_length_cm,           type: int}
+  - {name: product_height_cm,           type: int}
+  - {name: product_width_cm,            type: int}
+  - {name: _silver_processed_ts,        type: timestamp, nullable: false}
+
+quality:
+  hard_rules:
+    - {reason: product_id_null, condition: "product_id IS NULL"}
+
+  expectations:
+    - id: product_id_unique
+      severity: critical
+      rationale: product_id must be unique post-MERGE
+      type: ExpectColumnValuesToBeUnique
+      kwargs: {column: product_id}
+
+    - id: row_count_not_empty
+      severity: critical
+      rationale: empty dim_product means upstream broke
+      type: ExpectTableRowCountToBeBetween
+      kwargs: {min_value: 1}
+
+    - id: category_mostly_present
+      severity: warning
+      rationale: any uncategorized is a warning; mostly threshold flags systemic drift
+      type: ExpectColumnValuesToNotBeNull
+      kwargs: {column: product_category_name, mostly: 0.99}
+
+    - id: weight_plausible
+      severity: warning
+      rationale: product_weight_g must be 1g..100kg for >=99% of products
+      type: ExpectColumnValuesToBeBetween
+      kwargs: {column: product_weight_g, min_value: 1, max_value: 100000, mostly: 0.99}

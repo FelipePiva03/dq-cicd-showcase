@@ -1,0 +1,50 @@
+# =============================================================================
+# Data contract — silver.dim_geolocation
+# =============================================================================
+version: 1
+
+metadata:
+  catalog_schema: silver
+  table: dim_geolocation
+  owner: data-platform
+  description: SCD1 zip-prefix geolocation dimension. Source has many rows per
+    zip; conform_geolocation collapses to one row per zip prefix (avg lat/lng).
+  cadence: daily-04h
+  natural_key: [geolocation_zip_code_prefix]
+
+schema:
+  - {name: geolocation_zip_code_prefix, type: string, nullable: false}
+  - {name: geolocation_lat,             type: double}
+  - {name: geolocation_lng,             type: double}
+  - {name: geolocation_city,            type: string}
+  - {name: geolocation_state,           type: string}
+  - {name: _silver_processed_ts,        type: timestamp, nullable: false}
+
+quality:
+  hard_rules:
+    - {reason: zip_prefix_null, condition: "geolocation_zip_code_prefix IS NULL"}
+
+  expectations:
+    - id: zip_prefix_unique
+      severity: critical
+      rationale: zip prefix must be unique (collapsed by groupBy in silver)
+      type: ExpectColumnValuesToBeUnique
+      kwargs: {column: geolocation_zip_code_prefix}
+
+    - id: row_count_not_empty
+      severity: critical
+      rationale: empty dim_geolocation means upstream broke
+      type: ExpectTableRowCountToBeBetween
+      kwargs: {min_value: 1}
+
+    - id: lat_in_brazil_bbox
+      severity: warning
+      rationale: lat must be inside Brazil bounding box for >=99% of zips
+      type: ExpectColumnValuesToBeBetween
+      kwargs: {column: geolocation_lat, min_value: -34, max_value: 5, mostly: 0.99}
+
+    - id: lng_in_brazil_bbox
+      severity: warning
+      rationale: lng must be inside Brazil bounding box for >=99% of zips
+      type: ExpectColumnValuesToBeBetween
+      kwargs: {column: geolocation_lng, min_value: -75, max_value: -33, mostly: 0.99}

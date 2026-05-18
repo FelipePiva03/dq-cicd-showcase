@@ -11,6 +11,7 @@ dependencies = [
   "great-expectations==1.5.6",
   "soda-core-spark-df==3.5.6",
   "delta-spark==3.2.0",
+  "pyyaml>=6.0",  # parses contracts/*.yml in dq.contracts.loader
 ]
 
 [project.optional-dependencies]
@@ -62,4 +63,3 @@ markers = [
 
 [tool.coverage.run]
 source = ["src"]
-omit = ["src/dq/great_expectations/checkpoints/*"]

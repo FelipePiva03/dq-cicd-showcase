@@ -108,8 +108,8 @@ resources:
               - "${var.catalog}"
               - "--table"
               - "orders"
-              - "--suite-dir"
-              - "${workspace.file_path}/src/dq/great_expectations/expectations"
+              - "--contracts-dir"
+              - "${workspace.file_path}/contracts"
           environment_key: gx
 
         - task_key: gx_validation_order_items
@@ -121,8 +121,8 @@ resources:
               - "${var.catalog}"
               - "--table"
               - "order_items"
-              - "--suite-dir"
-              - "${workspace.file_path}/src/dq/great_expectations/expectations"
+              - "--contracts-dir"
+              - "${workspace.file_path}/contracts"
           environment_key: gx
 
         - task_key: gx_validation_order_payments
@@ -134,8 +134,8 @@ resources:
               - "${var.catalog}"
               - "--table"
               - "order_payments"
-              - "--suite-dir"
-              - "${workspace.file_path}/src/dq/great_expectations/expectations"
+              - "--contracts-dir"
+              - "${workspace.file_path}/contracts"
           environment_key: gx
 
         - task_key: gx_validation_order_reviews
@@ -147,8 +147,8 @@ resources:
               - "${var.catalog}"
               - "--table"
               - "order_reviews"
-              - "--suite-dir"
-              - "${workspace.file_path}/src/dq/great_expectations/expectations"
+              - "--contracts-dir"
+              - "${workspace.file_path}/contracts"
           environment_key: gx
 
       environments:

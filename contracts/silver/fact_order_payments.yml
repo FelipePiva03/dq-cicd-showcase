@@ -1,0 +1,53 @@
+# =============================================================================
+# Data contract — silver.fact_order_payments
+# =============================================================================
+version: 1
+
+metadata:
+  catalog_schema: silver
+  table: fact_order_payments
+  owner: data-platform
+  description: Conformed payment facts. Composite PK (order_id, payment_sequential).
+  cadence: streaming-5m
+  natural_key: [order_id, payment_sequential]
+
+schema:
+  - {name: order_id,             type: string,          nullable: false}
+  - {name: payment_sequential,   type: int,             nullable: false}
+  - {name: payment_type,         type: string,          nullable: false}
+  - {name: payment_installments, type: int}
+  - {name: payment_value,        type: "decimal(10,2)", nullable: false}
+  - {name: _silver_processed_ts, type: timestamp,       nullable: false}
+
+quality:
+  hard_rules:
+    - {reason: order_id_null,           condition: "order_id IS NULL"}
+    - {reason: payment_sequential_null, condition: "payment_sequential IS NULL"}
+    - {reason: payment_value_unparseable, condition: "payment_value IS NULL"}
+
+  expectations:
+    - id: compound_pk_unique
+      severity: critical
+      rationale: duplicate payment row would inflate total revenue in gold
+      type: ExpectCompoundColumnsToBeUnique
+      kwargs: {column_list: [order_id, payment_sequential]}
+
+    - id: payment_type_in_set
+      severity: critical
+      rationale: unknown payment_type breaks gold breakdowns by method
+      type: ExpectColumnValuesToBeInSet
+      kwargs:
+        column: payment_type
+        value_set: [credit_card, boleto, voucher, debit_card, not_defined]
+
+    - id: payment_value_plausible
+      severity: critical
+      rationale: negative or absurd payment value corrupts gold revenue totals
+      type: ExpectColumnValuesToBeBetween
+      kwargs: {column: payment_value, min_value: 0, max_value: 100000}
+
+    - id: installments_plausible
+      severity: warning
+      rationale: 0 installments valid for boleto/voucher; 24 is Brazilian credit-card max; rare outliers tolerated
+      type: ExpectColumnValuesToBeBetween
+      kwargs: {column: payment_installments, min_value: 0, max_value: 24, mostly: 0.999}

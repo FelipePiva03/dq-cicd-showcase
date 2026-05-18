@@ -1,0 +1,56 @@
+# =============================================================================
+# Data contract — gold.delivery_performance
+# =============================================================================
+version: 1
+
+metadata:
+  catalog_schema: gold
+  table: delivery_performance
+  owner: analytics
+  description: Weekly avg/p95 days-to-delivery + delivered order volume.
+  cadence: nightly-05h
+  natural_key: [week_start]
+
+schema:
+  - {name: week_start,           type: timestamp, nullable: false}
+  - {name: avg_days_to_delivery, type: double}
+  - {name: p95_days_to_delivery, type: double}
+  - {name: delivered_orders,     type: long,      nullable: false}
+
+quality:
+  expectations:
+    - id: row_count_not_empty
+      severity: critical
+      rationale: at least one weekly aggregation must exist
+      type: ExpectTableRowCountToBeBetween
+      kwargs: {min_value: 1}
+
+    - id: week_start_not_null
+      severity: critical
+      rationale: week_start is the natural key — never null
+      type: ExpectColumnValuesToNotBeNull
+      kwargs: {column: week_start}
+
+    - id: week_start_unique
+      severity: critical
+      rationale: one row per week — week_start is the PK
+      type: ExpectColumnValuesToBeUnique
+      kwargs: {column: week_start}
+
+    - id: delivered_orders_non_negative
+      severity: critical
+      rationale: aggregated count cannot be negative
+      type: ExpectColumnValuesToBeBetween
+      kwargs: {column: delivered_orders, min_value: 0}
+
+    - id: avg_delivery_plausible
+      severity: warning
+      rationale: avg delivery within 0..90 days for >=99% of weeks
+      type: ExpectColumnValuesToBeBetween
+      kwargs: {column: avg_days_to_delivery, min_value: 0, max_value: 90, mostly: 0.99}
+
+    - id: p95_delivery_plausible
+      severity: warning
+      rationale: p95 delivery within 0..120 days for >=99% of weeks
+      type: ExpectColumnValuesToBeBetween
+      kwargs: {column: p95_days_to_delivery, min_value: 0, max_value: 120, mostly: 0.99}

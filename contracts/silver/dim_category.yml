@@ -1,0 +1,40 @@
+# =============================================================================
+# Data contract — silver.dim_category
+# =============================================================================
+version: 1
+
+metadata:
+  catalog_schema: silver
+  table: dim_category
+  owner: data-platform
+  description: Product category translation table (PT-BR -> EN).
+  cadence: daily-04h
+  natural_key: [product_category_name]
+
+schema:
+  - {name: product_category_name,         type: string, nullable: false}
+  - {name: product_category_name_english, type: string, nullable: false}
+  - {name: _silver_processed_ts,          type: timestamp, nullable: false}
+
+quality:
+  hard_rules:
+    - {reason: category_name_null, condition: "product_category_name IS NULL"}
+
+  expectations:
+    - id: category_name_unique
+      severity: critical
+      rationale: category name must be unique (it's the PK)
+      type: ExpectColumnValuesToBeUnique
+      kwargs: {column: product_category_name}
+
+    - id: english_translation_present
+      severity: critical
+      rationale: gold marts use english translation for display
+      type: ExpectColumnValuesToNotBeNull
+      kwargs: {column: product_category_name_english}
+
+    - id: row_count_in_olist_range
+      severity: warning
+      rationale: Olist has ~71 categories; outside [50,200] suggests source drift
+      type: ExpectTableRowCountToBeBetween
+      kwargs: {min_value: 50, max_value: 200}

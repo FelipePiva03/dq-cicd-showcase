@@ -25,33 +25,37 @@ Why batch (not stream):
 from __future__ import annotations
 
 import argparse
+import sys
+from functools import cache
+from pathlib import Path
+
+# Make `src/` importable for Databricks spark_python_task (which only adds
+# the script's own directory to sys.path).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from delta.tables import DeltaTable
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
+from dq.contracts import load_contract, to_hard_rules_case
+
 DIM_TABLES = ("customer", "product", "seller", "geolocation", "category")
 
-# Natural keys per dim. geolocation collapses to zip prefix (Olist has many
-# rows per zip with different lat/lng — we average).
-NATURAL_KEYS: dict[str, list[str]] = {
-    "customer": ["customer_id"],
-    "product": ["product_id"],
-    "seller": ["seller_id"],
-    "geolocation": ["geolocation_zip_code_prefix"],
-    "category": ["product_category_name"],
-}
 
-# Hard structural rules. Dims are simpler than facts — PK not null is the
-# main concern. PK collisions are resolved earlier in conform (grouping for
-# geolocation, deduplication for the rest if needed).
-HARD_RULES: dict[str, str] = {
-    "customer": "CASE WHEN customer_id IS NULL THEN 'customer_id_null' ELSE NULL END",
-    "product": "CASE WHEN product_id IS NULL THEN 'product_id_null' ELSE NULL END",
-    "seller": "CASE WHEN seller_id IS NULL THEN 'seller_id_null' ELSE NULL END",
-    "geolocation": "CASE WHEN geolocation_zip_code_prefix IS NULL THEN 'zip_prefix_null' ELSE NULL END",
-    "category": "CASE WHEN product_category_name IS NULL THEN 'category_name_null' ELSE NULL END",
-}
+@cache
+def _contract(table: str):
+    """Load the silver/dim_{table} contract once per process."""
+    return load_contract("silver", f"dim_{table}")
+
+
+def natural_key(table: str) -> list[str]:
+    """Natural key for the dim table, from its contract."""
+    return _contract(table).natural_key
+
+
+def hard_rules_case(table: str) -> str:
+    """SQL CASE expression for split_quarantine(), generated from the contract."""
+    return to_hard_rules_case(_contract(table))
 
 
 # ---------------------------------------------------------------------------
@@ -133,8 +137,8 @@ CONFORMERS = {
 # Shared transforms: quarantine split + SCD1 MERGE
 # ---------------------------------------------------------------------------
 def split_quarantine(df: DataFrame, table: str) -> tuple[DataFrame, DataFrame]:
-    """Splits a conformed dim DF into (valid, quarantined) using HARD_RULES."""
-    tagged = df.withColumn("_quarantine_reason", F.expr(HARD_RULES[table]))
+    """Splits a conformed dim DF into (valid, quarantined) using the contract's hard_rules."""
+    tagged = df.withColumn("_quarantine_reason", F.expr(hard_rules_case(table)))
     valid = tagged.filter("_quarantine_reason IS NULL").drop("_quarantine_reason")
     quarantined = tagged.filter("_quarantine_reason IS NOT NULL").withColumn(
         "_quarantine_ts", F.current_timestamp()
@@ -200,7 +204,7 @@ def main() -> None:
         quarantined.write.format("delta").mode(mode).saveAsTable(quarantine_table)
         print(f"[quarantine-dim] {args.table:12s} rows appended to {quarantine_table}")
 
-    merge_scd1(spark, valid, silver_table, NATURAL_KEYS[args.table])
+    merge_scd1(spark, valid, silver_table, natural_key(args.table))
 
     print(f"[silver-dim] {args.table:12s} done — silver={silver_table}")
 
