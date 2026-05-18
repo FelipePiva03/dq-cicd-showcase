@@ -109,8 +109,35 @@ resources:
             parameters: ["--catalog", "${var.catalog}", "--table", "category"]
           environment_key: default
 
+        # ----- SODA GATE: one scan over all 5 dims --------------------------
+        - task_key: soda_validation_dims
+          depends_on:
+            - { task_key: silver_dim_customer }
+            - { task_key: silver_dim_product }
+            - { task_key: silver_dim_seller }
+            - { task_key: silver_dim_geolocation }
+            - { task_key: silver_dim_category }
+          spark_python_task:
+            python_file: ../../src/dq/soda/run_scan.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--checks-file"
+              - "silver_dims_checks.yml"
+              - "--checks-dir"
+              - "${workspace.file_path}/src/dq/soda/checks"
+              - "--tables"
+              - "silver.dim_customer,silver.dim_product,silver.dim_seller,silver.dim_geolocation,silver.dim_category"
+          environment_key: soda
+
       environments:
         - environment_key: default
           spec:
             client: "2"
             dependencies: []
+
+        - environment_key: soda
+          spec:
+            client: "2"
+            dependencies:
+              - soda-core-spark-df==3.5.6
