@@ -28,13 +28,23 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# Make `src/` importable for Databricks spark_python_task.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+# Make `src/` importable so `from dq.contracts import ...` works under both
+# pytest (project root on PYTHONPATH) and Databricks spark_python_task (which
+# does NOT set __file__ — runs via exec()). Walk up sys.argv[0] until we find
+# either a directory named `src` or a parent containing `src/`.
+_script = Path(sys.argv[0]).resolve()
+for _p in (_script, *_script.parents):
+    if _p.name == "src":
+        sys.path.insert(0, str(_p))
+        break
+    if (_p / "src").is_dir():
+        sys.path.insert(0, str(_p / "src"))
+        break
 
-from pyspark.sql import SparkSession
-from soda.scan import Scan
+from pyspark.sql import SparkSession  # noqa: E402
+from soda.scan import Scan  # noqa: E402
 
-from dq.contracts import load_contract, to_soda_yaml
+from dq.contracts import load_contract, to_soda_yaml  # noqa: E402
 
 DEFAULT_CONTRACTS_DIR = Path("contracts")
 

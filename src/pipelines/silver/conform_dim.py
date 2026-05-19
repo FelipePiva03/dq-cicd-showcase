@@ -29,15 +29,22 @@ import sys
 from functools import cache
 from pathlib import Path
 
-# Make `src/` importable for Databricks spark_python_task (which only adds
-# the script's own directory to sys.path).
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+# Make `src/` importable. Databricks spark_python_task does NOT set __file__
+# (runs via exec()) — use sys.argv[0] and walk up until we find `src/`.
+_script = Path(sys.argv[0]).resolve()
+for _p in (_script, *_script.parents):
+    if _p.name == "src":
+        sys.path.insert(0, str(_p))
+        break
+    if (_p / "src").is_dir():
+        sys.path.insert(0, str(_p / "src"))
+        break
 
-from delta.tables import DeltaTable
-from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql import functions as F
+from delta.tables import DeltaTable  # noqa: E402
+from pyspark.sql import DataFrame, SparkSession  # noqa: E402
+from pyspark.sql import functions as F  # noqa: E402
 
-from dq.contracts import load_contract, to_hard_rules_case
+from dq.contracts import load_contract, to_hard_rules_case  # noqa: E402
 
 DIM_TABLES = ("customer", "product", "seller", "geolocation", "category")
 
