@@ -1,7 +1,7 @@
 [project]
 name = "dq-cicd-showcase"
 version = "0.1.0"
-description = "Streaming Medallion pipeline on Databricks with Data Quality gates (GX + Soda) and CI/CD via DABs."
+description = "Streaming Medallion pipeline on Databricks with Data Quality gates (Great Expectations) and CI/CD via DABs."
 authors = [{ name = "Felipe Piva", email = "felipepiva02@gmail.com" }]
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -9,7 +9,6 @@ readme = "README.md"
 
 dependencies = [
   "great-expectations==1.5.6",
-  "soda-core-spark-df==3.3.7",
   "delta-spark==3.2.0",
   "pyyaml>=6.0",  # parses contracts/*.yml in dq.contracts.loader
 ]

@@ -11,7 +11,6 @@ from src.dq.contracts import (
     load_contract,
     to_gx_suite,
     to_hard_rules_case,
-    to_soda_yaml,
 )
 
 CONTRACTS_DIR = Path("contracts")
@@ -102,16 +101,17 @@ def test_to_gx_suite_round_trip(table):
     assert len(suite.expectations) == len(c.expectations)
 
 
-def test_to_soda_yaml_emits_check_blocks_per_table():
-    contracts = [load_contract("silver", t) for t in DIM_TABLES]
-    out = to_soda_yaml(contracts)
-    for t in DIM_TABLES:
-        assert f"checks for {t}:" in out
+@pytest.mark.parametrize("table", DIM_TABLES)
+def test_to_gx_suite_dims(table):
+    c = load_contract("silver", table)
+    suite = to_gx_suite(c)
+    assert suite.name == f"silver_{table}_suite"
+    assert len(suite.expectations) == len(c.expectations)
 
 
-def test_to_soda_yaml_tiered_severity():
-    """warning expectations must add `warn: when ...`; critical must not."""
-    c = load_contract("silver", "dim_customer")
-    out = to_soda_yaml([c])
-    # dim_customer has critical (unique, row_count) + warning (state in set)
-    assert "warn: when" in out, "warning expectations should emit `warn: when`"
+@pytest.mark.parametrize("table", GOLD_TABLES)
+def test_to_gx_suite_gold(table):
+    c = load_contract("gold", table)
+    suite = to_gx_suite(c)
+    assert suite.name == f"gold_{table}_suite"
+    assert len(suite.expectations) == len(c.expectations)

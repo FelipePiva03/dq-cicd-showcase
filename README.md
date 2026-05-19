@@ -10,9 +10,9 @@
 > (Olist), with **Data Quality gates** between every layer and a full
 > **CI/CD lifecycle** powered by **Databricks Asset Bundles** + GitHub Actions.
 >
-> Uses **Great Expectations** as the silver-fact gate (tiered critical/warning)
-> and **Soda Core** as the silver-dim and gold-mart gates — each tool used
-> where it fits best for the layer's failure mode.
+> Uses **Great Expectations** (1.x) as the single DQ gate across silver
+> facts, silver dimensions, and gold marts — with tiered critical/warning
+> severity driven by per-table contracts.
 
 ---
 
@@ -25,8 +25,8 @@
 | **SCD1 MERGE on dimensions** | [`src/pipelines/silver/conform_dim.py`](src/pipelines/silver/conform_dim.py) |
 | **Quarantine pre-MERGE for hard violations** | [`src/pipelines/silver/conform_fact.py`](src/pipelines/silver/conform_fact.py) (`HARD_RULES`, `split_quarantine`) |
 | **Databricks Asset Bundles (dev + prod targets)** | [`databricks.yml`](databricks.yml), [`resources/jobs/`](resources/jobs/) |
-| **GX gate (silver facts, tiered critical/warning)** | [`src/dq/great_expectations/`](src/dq/great_expectations/) |
-| **Soda gate (silver dims + gold marts)** | [`src/dq/soda/`](src/dq/soda/) |
+| **GX gate (silver facts + dims + gold marts, tiered critical/warning)** | [`src/dq/great_expectations/`](src/dq/great_expectations/) |
+| **Contract-driven DQ (one YAML per table)** | [`contracts/`](contracts/), [`src/dq/contracts/`](src/dq/contracts/) |
 | **3-stage CI/CD on GitHub Actions** | [`.github/workflows/`](.github/workflows/) |
 | **Pytest unit + integration tests with chispa** | [`tests/`](tests/) |
 
@@ -66,7 +66,7 @@
         │ (critical/warn)  │          │
         └──────────┬───────┘          │
                    │  ┌───────────────┘
-                   │  │  🛡️ Soda gate (dims)
+                   │  │  🛡️ GX gate (dims)
                    ▼  ▼
         ┌────────────────────────┐
         │  gold.daily_orders     │
@@ -74,7 +74,7 @@
         └──────────┬─────────────┘
                    │
         ┌──────────┴───────┐
-        │ 🛡️ Soda gate     │  gold mart invariants
+        │ 🛡️ GX gate       │  gold mart invariants
         └──────────┬───────┘
                    ▼
         ┌────────────────────────┐
@@ -173,7 +173,7 @@ databricks bundle run streaming_events --target dev
 | Auto Loader instead of Kafka | Kafka was overkill for a static dataset replay; Auto Loader is the Databricks-native pattern |
 | `foreachBatch` + MERGE on Silver | Order status updates require idempotent upserts, not appends |
 | DQ as separate job tasks | Failure points are visible in the run timeline, not buried in logs |
-| GX on facts, Soda on dims+marts | GX's Python flexibility fits cross-column fact checks; Soda's YAML fits analyst-readable dim/mart invariants |
+| GX everywhere (single runner) | Soda Core was tried first for dims/gold but failed on Databricks serverless (`client: "2"`) — both 3.3.7 and 3.5.6 raised Spark-Connect/session-detach errors mid-scan. GX 1.x runs cleanly across facts, dims, and marts; the contract layer abstracts the runner so the swap was a one-file rewrite |
 | Quarantine pre-MERGE, gates post-MERGE | Hard structural failures shouldn't poison silver; soft business failures should block downstream |
 | DABs instead of "deploy notebooks" | IaC, multi-env for free, source-of-truth in Git |
 

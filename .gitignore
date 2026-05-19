@@ -17,9 +17,6 @@ htmlcov/
 src/dq/great_expectations/uncommitted/
 src/dq/great_expectations/checkpoints/*.pickle
 
-# Soda
-.soda/
-
 # Data (never commit data — pull from Kaggle locally)
 data/raw/
 data/bronze/

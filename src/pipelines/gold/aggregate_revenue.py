@@ -8,8 +8,9 @@ project; here we keep it focused on orders for the showcase). Produces:
   - gold.daily_orders: count of orders per day per status
   - gold.delivery_performance: avg/p95 days_to_delivery per week
 
-These are the tables Soda Core then validates with business rules
-(no negative counts, delivery time within plausible range, etc).
+These are the tables Great Expectations then validates with business
+rules (no negative counts, delivery time within plausible range, etc)
+via the generalized run_checkpoint.py script.
 """
 
 from __future__ import annotations

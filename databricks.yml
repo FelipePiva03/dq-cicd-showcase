@@ -1,7 +1,7 @@
 # =============================================================================
 # Databricks Asset Bundle — dq-cicd-showcase
 # =============================================================================
-# Streaming Medallion pipeline with embedded Data Quality gates (GX + Soda).
+# Streaming Medallion pipeline with embedded Data Quality gates (Great Expectations).
 # Two targets: dev (default, personal workspace) and prod (CI-deployed).
 # =============================================================================
 

@@ -1,35 +1,27 @@
 # =============================================================================
-# batch_dimensions — Bronze + Silver SCD1 for the 5 dimension tables
+# batch_dimensions — Bronze + Silver SCD1 + GX gate for the 5 dim tables
 # =============================================================================
-# Topology (10 tasks, 5 parallel chains):
+# Topology (15 tasks, 5 parallel chains):
 #
-#     bronze_dim_customer    ─→ silver_dim_customer
-#     bronze_dim_product     ─→ silver_dim_product
-#     bronze_dim_seller      ─→ silver_dim_seller
-#     bronze_dim_geolocation ─→ silver_dim_geolocation
-#     bronze_dim_category    ─→ silver_dim_category
+#     bronze_dim_customer    ─→ silver_dim_customer    ─→ gx_validation_dim_customer
+#     bronze_dim_product     ─→ silver_dim_product     ─→ gx_validation_dim_product
+#     bronze_dim_seller      ─→ silver_dim_seller      ─→ gx_validation_dim_seller
+#     bronze_dim_geolocation ─→ silver_dim_geolocation ─→ gx_validation_dim_geolocation
+#     bronze_dim_category    ─→ silver_dim_category    ─→ gx_validation_dim_category
 #
 # Cadence: daily 04:00 America/Sao_Paulo (auto-paused in dev by DABs
-# `mode: development`). Dims are slow-changing master data — overnight
-# is the right beat, not every-5-min like streaming_events.
+# `mode: development`). Dims are slow-changing master data.
 #
-# Why a different job (not lumped into streaming_events):
-#   - Different cadence (daily vs 5-min) → would over- or under-trigger
-#   - Different failure surface (dim refresh failing doesn't have to block
-#     event ingestion)
-#   - Cleaner Workflows graph in the UI
+# DQ: GX gate per dim (one task per contract). Soda was tried first but
+# failed on Databricks serverless (see run_checkpoint.py docstring).
 #
-# Soda gate on these dims will be added in phase 7 — job name stays
-# `batch_dimensions` so phase 7 just appends gate tasks.
-#
-# Compute: serverless (Free Edition; also right for cost — each task is
-# short, no spin-up tax).
+# Compute: serverless (`client: "2"`).
 # =============================================================================
 
 resources:
   jobs:
     batch_dimensions:
-      name: "[${bundle.target}] Batch dimensions — Bronze + Silver SCD1"
+      name: "[${bundle.target}] Batch dimensions — Bronze + Silver + GX"
 
       email_notifications:
         on_failure:
@@ -38,8 +30,6 @@ resources:
       schedule:
         quartz_cron_expression: "0 0 4 * * ?"   # daily 04:00 (prod only)
         timezone_id: "America/Sao_Paulo"
-        # pause_status intentionally omitted: DABs `mode: development`
-        # auto-pauses in dev, leaves unpaused in prod.
 
       tasks:
         # ----- BRONZE: 5 parallel batch loads --------------------------------
@@ -109,26 +99,91 @@ resources:
             parameters: ["--catalog", "${var.catalog}", "--table", "category"]
           environment_key: default
 
-        # ----- SODA GATE: one scan over all 5 dims --------------------------
-        - task_key: soda_validation_dims
-          depends_on:
-            - { task_key: silver_dim_customer }
-            - { task_key: silver_dim_product }
-            - { task_key: silver_dim_seller }
-            - { task_key: silver_dim_geolocation }
-            - { task_key: silver_dim_category }
+        # ----- GX GATE: one task per dim contract -----------------------------
+        - task_key: gx_validation_dim_customer
+          depends_on: [{ task_key: silver_dim_customer }]
           spark_python_task:
-            python_file: ../../src/dq/soda/run_scan.py
+            python_file: ../../src/dq/great_expectations/run_checkpoint.py
             parameters:
               - "--catalog"
               - "${var.catalog}"
-              - "--scan-name"
-              - "silver_dims"
+              - "--layer"
+              - "silver"
+              - "--table"
+              - "dim_customer"
               - "--contracts-dir"
               - "${workspace.file_path}/contracts"
-              - "--tables"
-              - "silver.dim_customer,silver.dim_product,silver.dim_seller,silver.dim_geolocation,silver.dim_category"
-          environment_key: soda
+          max_retries: 2
+          min_retry_interval_millis: 30000
+          environment_key: gx
+
+        - task_key: gx_validation_dim_product
+          depends_on: [{ task_key: silver_dim_product }]
+          spark_python_task:
+            python_file: ../../src/dq/great_expectations/run_checkpoint.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--layer"
+              - "silver"
+              - "--table"
+              - "dim_product"
+              - "--contracts-dir"
+              - "${workspace.file_path}/contracts"
+          max_retries: 2
+          min_retry_interval_millis: 30000
+          environment_key: gx
+
+        - task_key: gx_validation_dim_seller
+          depends_on: [{ task_key: silver_dim_seller }]
+          spark_python_task:
+            python_file: ../../src/dq/great_expectations/run_checkpoint.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--layer"
+              - "silver"
+              - "--table"
+              - "dim_seller"
+              - "--contracts-dir"
+              - "${workspace.file_path}/contracts"
+          max_retries: 2
+          min_retry_interval_millis: 30000
+          environment_key: gx
+
+        - task_key: gx_validation_dim_geolocation
+          depends_on: [{ task_key: silver_dim_geolocation }]
+          spark_python_task:
+            python_file: ../../src/dq/great_expectations/run_checkpoint.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--layer"
+              - "silver"
+              - "--table"
+              - "dim_geolocation"
+              - "--contracts-dir"
+              - "${workspace.file_path}/contracts"
+          max_retries: 2
+          min_retry_interval_millis: 30000
+          environment_key: gx
+
+        - task_key: gx_validation_dim_category
+          depends_on: [{ task_key: silver_dim_category }]
+          spark_python_task:
+            python_file: ../../src/dq/great_expectations/run_checkpoint.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--layer"
+              - "silver"
+              - "--table"
+              - "dim_category"
+              - "--contracts-dir"
+              - "${workspace.file_path}/contracts"
+          max_retries: 2
+          min_retry_interval_millis: 30000
+          environment_key: gx
 
       environments:
         - environment_key: default
@@ -136,8 +191,8 @@ resources:
             client: "2"
             dependencies: []
 
-        - environment_key: soda
+        - environment_key: gx
           spec:
             client: "2"
             dependencies:
-              - soda-core-spark-df==3.3.7
+              - great-expectations==1.5.6

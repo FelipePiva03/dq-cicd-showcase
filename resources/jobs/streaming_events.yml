@@ -106,10 +106,14 @@ resources:
             parameters:
               - "--catalog"
               - "${var.catalog}"
+              - "--layer"
+              - "silver"
               - "--table"
-              - "orders"
+              - "fact_orders"
               - "--contracts-dir"
               - "${workspace.file_path}/contracts"
+          max_retries: 2
+          min_retry_interval_millis: 30000
           environment_key: gx
 
         - task_key: gx_validation_order_items
@@ -119,10 +123,14 @@ resources:
             parameters:
               - "--catalog"
               - "${var.catalog}"
+              - "--layer"
+              - "silver"
               - "--table"
-              - "order_items"
+              - "fact_order_items"
               - "--contracts-dir"
               - "${workspace.file_path}/contracts"
+          max_retries: 2
+          min_retry_interval_millis: 30000
           environment_key: gx
 
         - task_key: gx_validation_order_payments
@@ -132,10 +140,14 @@ resources:
             parameters:
               - "--catalog"
               - "${var.catalog}"
+              - "--layer"
+              - "silver"
               - "--table"
-              - "order_payments"
+              - "fact_order_payments"
               - "--contracts-dir"
               - "${workspace.file_path}/contracts"
+          max_retries: 2
+          min_retry_interval_millis: 30000
           environment_key: gx
 
         - task_key: gx_validation_order_reviews
@@ -145,10 +157,14 @@ resources:
             parameters:
               - "--catalog"
               - "${var.catalog}"
+              - "--layer"
+              - "silver"
               - "--table"
-              - "order_reviews"
+              - "fact_order_reviews"
               - "--contracts-dir"
               - "${workspace.file_path}/contracts"
+          max_retries: 2
+          min_retry_interval_millis: 30000
           environment_key: gx
 
       environments:

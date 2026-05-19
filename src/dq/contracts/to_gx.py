@@ -1,10 +1,10 @@
 """Contract → in-memory GX 1.x ExpectationSuite.
 
 GX imports happen *inside* `to_gx_suite()` (not at module top) so that
-non-GX consumers of `dq.contracts` (e.g. the silver pipelines, the Soda
-runner) don't need great_expectations installed in their environment.
-This keeps the Databricks `default` env lean — only the `gx` env carries
-the great_expectations dependency.
+non-GX consumers of `dq.contracts` (e.g. the silver pipelines, which use
+`to_hard_rules_case`) don't need great_expectations installed in their
+environment. This keeps the Databricks `default` env lean — only the
+`gx` env carries the great_expectations dependency.
 """
 
 from __future__ import annotations

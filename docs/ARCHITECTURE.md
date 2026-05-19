@@ -4,7 +4,7 @@
 
 ## Topology
 
-Four jobs, three cadences, two DQ tools — one medallion.
+Four jobs, three cadences, one DQ runner — one medallion.
 
 ```
                 ┌──────────────────────┐
@@ -29,7 +29,7 @@ Four jobs, three cadences, two DQ tools — one medallion.
 │                  │                  │                      │
 │ bronze.fact_*    │                  │ bronze.dim_*         │
 │ silver.fact_*    │                  │ silver.dim_*         │
-│ 🛡️ GX gate       │                  │ 🛡️ Soda gate         │
+│ 🛡️ GX gate       │                  │ 🛡️ GX gate           │
 └────────┬─────────┘                  └──────────┬───────────┘
          │                                       │
          └──────────────────┬────────────────────┘
@@ -37,7 +37,7 @@ Four jobs, three cadences, two DQ tools — one medallion.
                   ┌──────────────────┐
                   │ gold_aggregations│  schedule: nightly 05h
                   │ silver→gold      │  joins fact × dim
-                  │ 🛡️ Soda gate     │  business-rule checks
+                  │ 🛡️ GX gate       │  business-rule checks
                   └──────────────────┘
 ```
 
@@ -89,7 +89,7 @@ Examples:
 | `gold.top_categories` | Revenue & unit volume by product category |
 | `gold.customer_lifetime_value` | First-purchase, last-purchase, total spend per customer |
 
-Soda checks here protect business semantics (no negative revenue,
+GX checks here protect business semantics (no negative revenue,
 delivery_performance.on_time_rate between 0 and 1, etc).
 
 ## Event replay strategy
@@ -116,8 +116,8 @@ Three concentric defenses, each with a single job:
 | Layer | Catches | Failure mode |
 |---|---|---|
 | **Quarantine (silver pre-MERGE)** | Structural integrity — null PK, null FK to required dim, value unparseable after `try_cast` | Bad rows routed to `quarantine.fact_*` with `_quarantine_reason`; silver stays clean; pipeline continues |
-| **GX gate (silver post-MERGE)** | Business semantics — `days_to_delivery >= 0`, `review_score BETWEEN 1 AND 5`, status enums | Suite fails → downstream gold blocked; silver retains the run, GX results persisted to `dq.run_results` |
-| **Soda gate (gold post-marts)** | Aggregate invariants — `avg_revenue between 0 and 1e7`, `on_time_rate ∈ [0,1]` | Mart fails → consumers (BI, alerts) see stale data, not bad data |
+| **GX gate (silver post-MERGE)** | Business semantics — `days_to_delivery >= 0`, `review_score BETWEEN 1 AND 5`, status enums, dim uniqueness | Suite fails → downstream gold blocked; silver retains the run, GX results persisted to `dq.run_results` |
+| **GX gate (gold post-marts)** | Aggregate invariants — `avg_revenue between 0 and 1e7`, `on_time_rate ∈ [0,1]` | Mart fails → consumers (BI, alerts) see stale data, not bad data |
 
 **Why split hard vs soft rules?** Hard rules protect silver's *shape*
 (typed columns, MERGE keys present); soft rules protect downstream
@@ -126,11 +126,22 @@ gate forces a binary choice: either fail everything on a single null
 order_id, or let silver accept structurally broken rows. The split lets
 us keep ingesting while quarantining noise.
 
-**GX vs Soda — why both?** GX's Python expressiveness fits the
-structural+regex-heavy silver checks; Soda's YAML is ergonomic for the
-business-rule gold checks an analyst can read and edit. The split is
-deliberate so the comparison in [`docs/COMPARISON.md`](COMPARISON.md)
-reflects real usage, not synthetic toy checks.
+**Why GX everywhere (not Soda for dims/gold)?** Original design used Soda
+Core for dim and gold gates to showcase a second tool. Empirical testing
+on Databricks serverless (`client: "2"`) killed that:
+
+  - `soda-core-spark-df==3.3.7` raised `notebook command received after
+    detach` mid-scan
+  - `soda-core-spark-df==3.5.6` raised `Cannot start a remote Spark
+    session because there is a regular Spark session already running`
+
+Neither is fixable from user code — both are Spark Connect / session
+lifecycle issues in soda-core's Databricks adapter. GX 1.x has explicit
+serverless support and runs cleanly across all three asset classes
+(facts, dims, marts). The contract layer (`dq.contracts`) abstracts the
+runner, so the swap was a single-script rewrite of `run_checkpoint.py`
+to be parameterized by `--layer` + `--table` instead of hard-coded to
+silver facts.
 
 ### Known source data quirk: Olist CSV escaping
 

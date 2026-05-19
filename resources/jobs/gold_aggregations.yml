@@ -1,35 +1,21 @@
 # =============================================================================
-# gold_aggregations — Silver → Gold marts + Soda gate
+# gold_aggregations — Silver→Gold marts + GX gate (one task per mart)
 # =============================================================================
-# Topology (2 tasks):
+# Topology (3 tasks):
 #
-#     gold_aggregate_revenue ─→ soda_validation_gold
+#     gold_aggregate_revenue ─→ gx_validation_daily_orders
+#                            └→ gx_validation_delivery_performance
 #
-# `aggregate_revenue.py` reads silver.orders and writes both
-# `gold.daily_orders` (count by date + status) and
-# `gold.delivery_performance` (weekly avg/p95 days_to_delivery). Soda then
-# validates both marts in one scan via the parametrized run_scan.py
-# (--tables takes a comma list, --checks-file routes to gold_revenue_checks.yml).
+# Cadence: nightly 05:00 America/Sao_Paulo.
 #
-# Cadence: nightly 05:00 America/Sao_Paulo — runs *after* the streaming events
-# job (every 5 min) and *after* batch_dimensions (04:00 daily), so gold reads
-# the freshest silver of the day. Cross-job dependency is purely time-based —
-# DABs has no built-in cross-job depends_on, and for marts that recompute
-# from full silver scans, a time-based barrier is sufficient.
-#
-# Why a separate job (not appended to streaming_events):
-#   - Different cadence (nightly vs 5-min) — appending would over-trigger gold
-#   - Gold needs both fact + dim silver to be settled; coupling it to either
-#     upstream job would make the other a hidden dep
-#
-# Compute: serverless. Single gold env carries soda-core since the gate is
-# the only post-aggregation task here.
+# DQ: GX gate per mart, driven by the same generalized run_checkpoint.py
+# script used for silver facts and dims.
 # =============================================================================
 
 resources:
   jobs:
     gold_aggregations:
-      name: "[${bundle.target}] Gold aggregations — Silver→Gold + Soda gate"
+      name: "[${bundle.target}] Gold aggregations — Silver→Gold + GX gates"
 
       email_notifications:
         on_failure:
@@ -38,33 +24,49 @@ resources:
       schedule:
         quartz_cron_expression: "0 0 5 * * ?"   # daily 05:00 (prod only)
         timezone_id: "America/Sao_Paulo"
-        # pause_status intentionally omitted: DABs `mode: development`
-        # auto-pauses in dev, leaves unpaused in prod.
 
       tasks:
-        # ----- AGGREGATION: silver.orders → 2 gold marts --------------------
+        # ----- AGGREGATION: silver.fact_orders → 2 gold marts ---------------
         - task_key: gold_aggregate_revenue
           spark_python_task:
             python_file: ../../src/pipelines/gold/aggregate_revenue.py
             parameters: ["--catalog", "${var.catalog}"]
           environment_key: default
 
-        # ----- SODA GATE: scan both gold tables in one pass -----------------
-        - task_key: soda_validation_gold
-          depends_on:
-            - { task_key: gold_aggregate_revenue }
+        # ----- GX GATES: one task per mart ----------------------------------
+        - task_key: gx_validation_daily_orders
+          depends_on: [{ task_key: gold_aggregate_revenue }]
           spark_python_task:
-            python_file: ../../src/dq/soda/run_scan.py
+            python_file: ../../src/dq/great_expectations/run_checkpoint.py
             parameters:
               - "--catalog"
               - "${var.catalog}"
-              - "--scan-name"
-              - "gold_marts"
+              - "--layer"
+              - "gold"
+              - "--table"
+              - "daily_orders"
               - "--contracts-dir"
               - "${workspace.file_path}/contracts"
-              - "--tables"
-              - "gold.daily_orders,gold.delivery_performance"
-          environment_key: soda
+          max_retries: 2
+          min_retry_interval_millis: 30000
+          environment_key: gx
+
+        - task_key: gx_validation_delivery_performance
+          depends_on: [{ task_key: gold_aggregate_revenue }]
+          spark_python_task:
+            python_file: ../../src/dq/great_expectations/run_checkpoint.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--layer"
+              - "gold"
+              - "--table"
+              - "delivery_performance"
+              - "--contracts-dir"
+              - "${workspace.file_path}/contracts"
+          max_retries: 2
+          min_retry_interval_millis: 30000
+          environment_key: gx
 
       environments:
         - environment_key: default
@@ -72,8 +74,8 @@ resources:
             client: "2"
             dependencies: []
 
-        - environment_key: soda
+        - environment_key: gx
           spec:
             client: "2"
             dependencies:
-              - soda-core-spark-df==3.3.7
+              - great-expectations==1.5.6

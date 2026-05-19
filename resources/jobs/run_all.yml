@@ -1,33 +1,38 @@
 # =============================================================================
 # run_all — flat end-to-end orchestrator (demo / smoke-test)
 # =============================================================================
-# Every step of the medallion shown explicitly as a separate task — 26 tasks
+# Every step of the medallion shown explicitly as a separate task — 31 tasks
 # in one DAG so the Workflows UI lineage is the whole story of the pipeline.
 # No `run_job_task` wrapping; nothing hidden inside other jobs.
+#
+# Producer is idempotent: replay_olist.py short-circuits when the landing
+# volume is already populated for every requested table (sub-minute existence
+# check via `binaryFile` metadata). First run seeds ~5 min; subsequent
+# run_all invocations pay the existence check only. Pass `--force` to
+# re-replay from scratch.
 #
 # Topology:
 #
 #                         ┌────────────────────┐
-#                         │ producer_replay    │
-#                         └──────────┬─────────┘
+#                         │ producer_replay    │  (idempotent — sub-minute
+#                         └──────────┬─────────┘   when already seeded)
 #                                    │
 #         ┌──────────────────────────┴───────────────────────────┐
-#         │                                                       │
 #         │ (event chains)                            (dim chains, independent)
 #         ▼                                                       ▼
 #   bronze_orders / items / payments / reviews     bronze_dim_*  (5 parallel,
 #         ▼                                                       │ read from
-#   silver_fact_orders / items / payments / reviews                │ source/raw —
-#         ▼                                                       │ no producer dep)
-#   gx_validation_*  (4, tiered crit/warn)         silver_dim_*  (5 parallel)
+#   silver_fact_orders / items / payments / reviews                │ source/raw)
+#         ▼                                                       │
+#   gx_validation_fact_*  (4, tiered crit/warn)    silver_dim_*  (5 parallel)
 #                                                                ▼
-#                                                soda_validation_dims  (1)
+#                                                  gx_validation_dim_*  (5)
 #         │                                                       │
 #         └──────────────┬───────────────────────────────────────┘
 #                        ▼
 #               gold_aggregate_revenue
 #                        ▼
-#               soda_validation_gold
+#       gx_validation_daily_orders + gx_validation_delivery_performance
 #
 # Not scheduled. Manual trigger only — this is the "show the whole pipeline
 # in one button" job for demos and end-to-end smokes. The 4 production
@@ -50,6 +55,10 @@ resources:
         # ============================================================
         # PRODUCER — temporal replay of event CSVs to landing volumes
         # ============================================================
+        # Idempotent: replay_olist.py skips work if landing already has
+        # batches for every requested table (see `already_replayed`). Pass
+        # `--force` to re-replay. First call seeds ~5 min; subsequent calls
+        # in `run_all` are sub-minute (just the existence check).
         - task_key: producer_replay
           spark_python_task:
             python_file: ../../src/pipelines/producer/replay_olist.py
@@ -200,10 +209,14 @@ resources:
             parameters:
               - "--catalog"
               - "${var.catalog}"
+              - "--layer"
+              - "silver"
               - "--table"
-              - "orders"
+              - "fact_orders"
               - "--contracts-dir"
               - "${workspace.file_path}/contracts"
+          max_retries: 2
+          min_retry_interval_millis: 30000
           environment_key: gx
 
         - task_key: gx_validation_order_items
@@ -213,10 +226,14 @@ resources:
             parameters:
               - "--catalog"
               - "${var.catalog}"
+              - "--layer"
+              - "silver"
               - "--table"
-              - "order_items"
+              - "fact_order_items"
               - "--contracts-dir"
               - "${workspace.file_path}/contracts"
+          max_retries: 2
+          min_retry_interval_millis: 30000
           environment_key: gx
 
         - task_key: gx_validation_order_payments
@@ -226,10 +243,14 @@ resources:
             parameters:
               - "--catalog"
               - "${var.catalog}"
+              - "--layer"
+              - "silver"
               - "--table"
-              - "order_payments"
+              - "fact_order_payments"
               - "--contracts-dir"
               - "${workspace.file_path}/contracts"
+          max_retries: 2
+          min_retry_interval_millis: 30000
           environment_key: gx
 
         - task_key: gx_validation_order_reviews
@@ -239,65 +260,157 @@ resources:
             parameters:
               - "--catalog"
               - "${var.catalog}"
+              - "--layer"
+              - "silver"
               - "--table"
-              - "order_reviews"
+              - "fact_order_reviews"
               - "--contracts-dir"
               - "${workspace.file_path}/contracts"
+          max_retries: 2
+          min_retry_interval_millis: 30000
           environment_key: gx
 
         # ============================================================
-        # SODA GATE (silver dims) — one scan across all 5 dims
+        # GX GATE (silver dims) — one task per dim contract
         # ============================================================
-        - task_key: soda_validation_dims
-          depends_on:
-            - { task_key: silver_dim_customer }
-            - { task_key: silver_dim_product }
-            - { task_key: silver_dim_seller }
-            - { task_key: silver_dim_geolocation }
-            - { task_key: silver_dim_category }
+        - task_key: gx_validation_dim_customer
+          depends_on: [{ task_key: silver_dim_customer }]
           spark_python_task:
-            python_file: ../../src/dq/soda/run_scan.py
+            python_file: ../../src/dq/great_expectations/run_checkpoint.py
             parameters:
               - "--catalog"
               - "${var.catalog}"
-              - "--scan-name"
-              - "silver_dims"
+              - "--layer"
+              - "silver"
+              - "--table"
+              - "dim_customer"
               - "--contracts-dir"
               - "${workspace.file_path}/contracts"
-              - "--tables"
-              - "silver.dim_customer,silver.dim_product,silver.dim_seller,silver.dim_geolocation,silver.dim_category"
-          environment_key: soda
+          max_retries: 2
+          min_retry_interval_millis: 30000
+          environment_key: gx
+
+        - task_key: gx_validation_dim_product
+          depends_on: [{ task_key: silver_dim_product }]
+          spark_python_task:
+            python_file: ../../src/dq/great_expectations/run_checkpoint.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--layer"
+              - "silver"
+              - "--table"
+              - "dim_product"
+              - "--contracts-dir"
+              - "${workspace.file_path}/contracts"
+          max_retries: 2
+          min_retry_interval_millis: 30000
+          environment_key: gx
+
+        - task_key: gx_validation_dim_seller
+          depends_on: [{ task_key: silver_dim_seller }]
+          spark_python_task:
+            python_file: ../../src/dq/great_expectations/run_checkpoint.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--layer"
+              - "silver"
+              - "--table"
+              - "dim_seller"
+              - "--contracts-dir"
+              - "${workspace.file_path}/contracts"
+          max_retries: 2
+          min_retry_interval_millis: 30000
+          environment_key: gx
+
+        - task_key: gx_validation_dim_geolocation
+          depends_on: [{ task_key: silver_dim_geolocation }]
+          spark_python_task:
+            python_file: ../../src/dq/great_expectations/run_checkpoint.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--layer"
+              - "silver"
+              - "--table"
+              - "dim_geolocation"
+              - "--contracts-dir"
+              - "${workspace.file_path}/contracts"
+          max_retries: 2
+          min_retry_interval_millis: 30000
+          environment_key: gx
+
+        - task_key: gx_validation_dim_category
+          depends_on: [{ task_key: silver_dim_category }]
+          spark_python_task:
+            python_file: ../../src/dq/great_expectations/run_checkpoint.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--layer"
+              - "silver"
+              - "--table"
+              - "dim_category"
+              - "--contracts-dir"
+              - "${workspace.file_path}/contracts"
+          max_retries: 2
+          min_retry_interval_millis: 30000
+          environment_key: gx
 
         # ============================================================
         # GOLD — aggregation depends on validated silver fact_orders
-        # AND validated silver dims (joins to dim_* assumed clean).
+        # AND all 5 validated silver dims.
         # ============================================================
         - task_key: gold_aggregate_revenue
           depends_on:
             - { task_key: gx_validation_orders }
-            - { task_key: soda_validation_dims }
+            - { task_key: gx_validation_dim_customer }
+            - { task_key: gx_validation_dim_product }
+            - { task_key: gx_validation_dim_seller }
+            - { task_key: gx_validation_dim_geolocation }
+            - { task_key: gx_validation_dim_category }
           spark_python_task:
             python_file: ../../src/pipelines/gold/aggregate_revenue.py
             parameters: ["--catalog", "${var.catalog}"]
           environment_key: default
 
         # ============================================================
-        # SODA GATE (gold marts) — one scan across both marts
+        # GX GATE (gold marts) — one task per mart contract
         # ============================================================
-        - task_key: soda_validation_gold
+        - task_key: gx_validation_daily_orders
           depends_on: [{ task_key: gold_aggregate_revenue }]
           spark_python_task:
-            python_file: ../../src/dq/soda/run_scan.py
+            python_file: ../../src/dq/great_expectations/run_checkpoint.py
             parameters:
               - "--catalog"
               - "${var.catalog}"
-              - "--scan-name"
-              - "gold_marts"
+              - "--layer"
+              - "gold"
+              - "--table"
+              - "daily_orders"
               - "--contracts-dir"
               - "${workspace.file_path}/contracts"
-              - "--tables"
-              - "gold.daily_orders,gold.delivery_performance"
-          environment_key: soda
+          max_retries: 2
+          min_retry_interval_millis: 30000
+          environment_key: gx
+
+        - task_key: gx_validation_delivery_performance
+          depends_on: [{ task_key: gold_aggregate_revenue }]
+          spark_python_task:
+            python_file: ../../src/dq/great_expectations/run_checkpoint.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--layer"
+              - "gold"
+              - "--table"
+              - "delivery_performance"
+              - "--contracts-dir"
+              - "${workspace.file_path}/contracts"
+          max_retries: 2
+          min_retry_interval_millis: 30000
+          environment_key: gx
 
       environments:
         - environment_key: default
@@ -310,9 +423,3 @@ resources:
             client: "2"
             dependencies:
               - great-expectations==1.5.6
-
-        - environment_key: soda
-          spec:
-            client: "2"
-            dependencies:
-              - soda-core-spark-df==3.3.7
