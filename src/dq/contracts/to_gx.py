@@ -1,12 +1,20 @@
-"""Contract → in-memory GX 1.x ExpectationSuite."""
+"""Contract → in-memory GX 1.x ExpectationSuite.
+
+GX imports happen *inside* `to_gx_suite()` (not at module top) so that
+non-GX consumers of `dq.contracts` (e.g. the silver pipelines, the Soda
+runner) don't need great_expectations installed in their environment.
+This keeps the Databricks `default` env lean — only the `gx` env carries
+the great_expectations dependency.
+"""
 
 from __future__ import annotations
 
-import great_expectations as gx
-import great_expectations.expectations as gxe
-from great_expectations.core.expectation_suite import ExpectationSuite
+from typing import TYPE_CHECKING
 
 from .loader import Contract
+
+if TYPE_CHECKING:  # only for type hints — never imported at runtime
+    from great_expectations.core.expectation_suite import ExpectationSuite
 
 
 def to_gx_suite(contract: Contract) -> ExpectationSuite:
@@ -17,9 +25,13 @@ def to_gx_suite(contract: Contract) -> ExpectationSuite:
     are preserved on every expectation so the tiered runner can read them.
 
     GX 1.x requires an active context before instantiating Expectations;
-    callers must ensure one exists (the runner does, via gx.get_context).
+    this function creates an ephemeral one if none is active.
     """
-    # Ensure a GX context exists (idempotent — returns the active one if any).
+    # Lazy imports — only paid by callers that actually use this adapter.
+    import great_expectations as gx
+    import great_expectations.expectations as gxe
+    from great_expectations.core.expectation_suite import ExpectationSuite
+
     gx.get_context(mode="ephemeral")
 
     suite_name = f"{contract.catalog_schema}_{contract.table}_suite"
