@@ -9,13 +9,13 @@ from chispa import assert_column_equality
 
 from src.pipelines.silver.conform_fact import (
     CONFORMERS,
-    HARD_RULES,
-    NATURAL_KEYS,
     conform_order_items,
     conform_order_payments,
     conform_order_reviews,
     conform_orders,
     dedupe_by_key,
+    hard_rules_case,
+    natural_key,
     split_quarantine,
 )
 
@@ -151,14 +151,19 @@ def test_dedupe_handles_composite_key(spark):
 # ---------------------------------------------------------------------------
 def test_every_event_table_has_conformer_keys_and_hard_rules():
     """If a new event table is added to EVENT_TABLES, the missing
-    entry here points right at the gap."""
+    entry here points right at the gap. Contract values are sourced from
+    `contracts/silver/fact_*.yml` via the `_contract()` cache; HARD_RULES
+    and NATURAL_KEYS are no longer module-level dicts (Phase 10)."""
     from src.pipelines.silver.conform_fact import EVENT_TABLES
 
     for t in EVENT_TABLES:
         assert t in CONFORMERS, f"{t} missing from CONFORMERS"
-        assert t in NATURAL_KEYS, f"{t} missing from NATURAL_KEYS"
-        assert t in HARD_RULES, f"{t} missing from HARD_RULES"
-        assert len(NATURAL_KEYS[t]) >= 1
+        keys = natural_key(t)
+        assert len(keys) >= 1, f"{t} has no natural_key in its contract"
+        case_sql = hard_rules_case(t)
+        assert (
+            "CASE" in case_sql and "END" in case_sql
+        ), f"{t} hard_rules_case is malformed: {case_sql!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +185,7 @@ def test_split_quarantine_separates_null_pk_from_silver(spark):
         "order_estimated_delivery_date timestamp, days_to_delivery int",
     )
 
-    valid, quarantined = split_quarantine(conformed, "orders")
+    valid, quarantined = split_quarantine(conformed, hard_rules_case("orders"))
     valid_ids = [r.order_id for r in valid.collect()]
     quar_rows = quarantined.collect()
 
@@ -200,7 +205,7 @@ def test_split_quarantine_keeps_clean_rows(spark):
         "shipping_limit_date timestamp, price decimal(10,2), "
         "freight_value decimal(10,2), _silver_processed_ts timestamp",
     )
-    valid, quarantined = split_quarantine(conformed, "order_items")
+    valid, quarantined = split_quarantine(conformed, hard_rules_case("order_items"))
 
     assert valid.count() == 1
     assert quarantined.count() == 0
@@ -217,7 +222,7 @@ def test_split_quarantine_reason_names_specific_rule(spark):
         "shipping_limit_date timestamp, price decimal(10,2), "
         "freight_value decimal(10,2), _silver_processed_ts timestamp",
     )
-    _, quarantined = split_quarantine(conformed, "order_items")
+    _, quarantined = split_quarantine(conformed, hard_rules_case("order_items"))
     row = quarantined.first()
     assert row._quarantine_reason == "price_unparseable"
     assert row._quarantine_ts is not None

@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main, develop]
   push:
-    branches: [develop]
+    branches: [main, develop]
 
 # Cancel older runs of the same branch when a new commit lands
 concurrency:
@@ -73,6 +73,13 @@ jobs:
       - uses: databricks/setup-cli@main
       - name: Validate dev target
         run: databricks bundle validate --target dev
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      - name: Validate prod target
+        # Catches prod-only config errors (mode: production constraints, root_path
+        # collisions, run_as identity) before they reach the deploy-prod workflow.
+        run: databricks bundle validate --target prod
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}

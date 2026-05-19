@@ -24,9 +24,11 @@ jobs:
       - name: Deploy
         run: databricks bundle deploy --target dev
 
-      - name: Smoke run — DQ validation only
-        run: databricks bundle run streaming_pipeline --target dev --only gx_validation_silver
-        continue-on-error: false
+      # No smoke task here intentionally: running run_all on every develop push
+      # is ~10 min on serverless and not the right gate for a deploy workflow.
+      # The bundle is validated (above) and the artifacts are uploaded to dev —
+      # operators trigger run_all manually when they want an E2E smoke. The
+      # actual code gates live in `ci.yml` (lint + unit + integration).
 
     env:
       DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}

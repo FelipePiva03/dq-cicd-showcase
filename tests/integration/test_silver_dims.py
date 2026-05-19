@@ -6,11 +6,11 @@ import pytest
 
 from src.pipelines.silver.conform_dim import (
     CONFORMERS,
-    HARD_RULES,
-    NATURAL_KEYS,
     conform_customer,
     conform_geolocation,
     conform_product,
+    hard_rules_case,
+    natural_key,
     split_quarantine,
 )
 
@@ -97,10 +97,16 @@ def test_split_quarantine_isolates_null_pk(spark):
 # Module-level contracts
 # ---------------------------------------------------------------------------
 def test_every_dim_has_conformer_keys_and_hard_rules():
+    """Contract values are sourced from `contracts/silver/dim_*.yml` via the
+    `_contract()` cache; HARD_RULES and NATURAL_KEYS are no longer module-level
+    dicts (Phase 10)."""
     from src.pipelines.silver.conform_dim import DIM_TABLES
 
     for t in DIM_TABLES:
         assert t in CONFORMERS, f"{t} missing from CONFORMERS"
-        assert t in NATURAL_KEYS, f"{t} missing from NATURAL_KEYS"
-        assert t in HARD_RULES, f"{t} missing from HARD_RULES"
-        assert len(NATURAL_KEYS[t]) >= 1
+        keys = natural_key(t)
+        assert len(keys) >= 1, f"{t} has no natural_key in its contract"
+        case_sql = hard_rules_case(t)
+        assert (
+            "CASE" in case_sql and "END" in case_sql
+        ), f"{t} hard_rules_case is malformed: {case_sql!r}"
