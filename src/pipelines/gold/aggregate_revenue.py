@@ -2,8 +2,9 @@
 Gold: Daily revenue aggregations
 =================================
 
-Reads from silver.orders + silver.order_items (joined upstream in a real
-project; here we keep it focused on orders for the showcase). Produces:
+Reads from silver.fact_orders (the conformed order facts produced by
+conform_fact.py). For the showcase we keep this focused on orders; a real
+project would also join silver.fact_order_items for revenue figures. Produces:
 
   - gold.daily_orders: count of orders per day per status
   - gold.delivery_performance: avg/p95 days_to_delivery per week
@@ -34,7 +35,7 @@ def main() -> None:
     catalog = args.catalog
     spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog}.gold")
 
-    silver = spark.read.table(f"{catalog}.silver.orders")
+    silver = spark.read.table(f"{catalog}.silver.fact_orders")
 
     # ---- gold.daily_orders ---------------------------------------------------
     daily = (
