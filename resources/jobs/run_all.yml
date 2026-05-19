@@ -315,4 +315,4 @@ resources:
           spec:
             client: "2"
             dependencies:
-              - soda-core-spark-df==3.5.6
+              - soda-core-spark-df==3.3.7

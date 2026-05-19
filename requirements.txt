@@ -6,7 +6,7 @@
 
 # --- runtime ---
 great-expectations==1.5.6
-soda-core-spark-df==3.5.6
+soda-core-spark-df==3.3.7
 delta-spark==3.2.0
 pyyaml>=6.0
 
