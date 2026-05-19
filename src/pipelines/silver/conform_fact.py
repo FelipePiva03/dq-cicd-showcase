@@ -193,14 +193,20 @@ def dedupe_by_key(df: DataFrame, keys: list[str], order_col: str = "_ingestion_t
     return df.withColumn("_rn", F.row_number().over(w)).filter("_rn = 1").drop("_rn")
 
 
-def split_quarantine(df: DataFrame, table: str) -> tuple[DataFrame, DataFrame]:
+def split_quarantine(df: DataFrame, hard_rules_sql: str) -> tuple[DataFrame, DataFrame]:
     """Splits a conformed DF into (valid_rows, quarantined_rows).
+
+    `hard_rules_sql` is the SQL CASE expression produced by
+    `to_hard_rules_case(contract)`. Taking the string directly (instead of a
+    table name + re-resolving the contract here) keeps this function free of
+    references to `_contract` — critical because this runs inside the
+    foreachBatch closure on the streaming worker (see `upsert_to_silver`).
 
     Quarantined rows keep the silver schema plus two metadata columns:
     `_quarantine_reason` (which contract hard_rule fired) and
     `_quarantine_ts` (wall-clock when the row was rejected).
     """
-    tagged = df.withColumn("_quarantine_reason", F.expr(hard_rules_case(table)))
+    tagged = df.withColumn("_quarantine_reason", F.expr(hard_rules_sql))
     valid = tagged.filter("_quarantine_reason IS NULL").drop("_quarantine_reason")
     quarantined = tagged.filter("_quarantine_reason IS NOT NULL").withColumn(
         "_quarantine_ts", F.current_timestamp()
@@ -217,15 +223,26 @@ def upsert_to_silver(
     quarantine_table: str,
     table_name: str,
 ):
-    """foreachBatch callback: dedupe → conform → split → MERGE valid + APPEND quarantine."""
+    """foreachBatch callback: dedupe → conform → split → MERGE valid + APPEND quarantine.
+
+    All contract-derived values (`keys`, `hard_rules_sql`, `merge_condition`)
+    are resolved here on the driver and captured into the `_upsert` closure as
+    plain str/list. Reason: Spark Connect (Databricks Serverless) cloudpickles
+    the foreachBatch callback to the streaming worker. Capturing the
+    `@cache`-wrapped `_contract` accessor causes `SerializationError`
+    /`AttributeError: Can't get attribute '_contract'` because cloudpickle
+    falls back to save-by-reference for cache wrappers and the worker
+    `__module__` for spark_python_task scripts isn't a normal import path.
+    """
     keys = natural_key(table_name)
+    hard_rules_sql = hard_rules_case(table_name)
     conform_fn = CONFORMERS[table_name]
     merge_condition = " AND ".join(f"t.{k} = s.{k}" for k in keys)
 
     def _upsert(batch_df: DataFrame, batch_id: int) -> None:
         deduped = dedupe_by_key(batch_df, keys)
         conformed = conform_fn(deduped)
-        valid, quarantined = split_quarantine(conformed, table_name)
+        valid, quarantined = split_quarantine(conformed, hard_rules_sql)
 
         # Quarantine first — even if MERGE fails, we keep the evidence.
         # head(1) is a cheap non-empty probe (one task, early termination).
