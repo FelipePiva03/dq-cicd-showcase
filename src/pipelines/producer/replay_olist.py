@@ -49,7 +49,39 @@ def parse_args() -> argparse.Namespace:
         default=",".join(EVENT_TABLES),
         help=f"Comma-separated subset of {EVENT_TABLES}",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-replay even if landing already contains batches for every "
+        "requested table. Default: skip (idempotent — replay is a 5-min "
+        "seed step, no need to re-pay on every run_all invocation).",
+    )
     return parser.parse_args()
+
+
+def already_replayed(spark: SparkSession, landing_root: str, tables: list[str]) -> bool:
+    """True iff every requested table already has at least one file under
+    `{landing_root}/{table}/`. Uses `binaryFile` format which only lists
+    file metadata, so the check is cheap (single-second range) regardless
+    of how many batches are present.
+    """
+    for t in tables:
+        try:
+            # recursiveFileLookup=true is required: batches are written under
+            # `{landing_root}/{t}/batch_NNNN/` subdirs, and binaryFile doesn't
+            # recurse by default — without it, the root-level listing comes
+            # back empty and we'd needlessly re-replay every run.
+            df = (
+                spark.read.format("binaryFile")
+                .option("recursiveFileLookup", "true")
+                .load(f"{landing_root}/{t}")
+            )
+            if df.limit(1).count() == 0:
+                return False
+        except Exception:
+            # Path doesn't exist or is unreadable → treat as not-yet-replayed.
+            return False
+    return True
 
 
 def attach_effective_ts(table: str, df: DataFrame, orders_df: DataFrame) -> DataFrame:
@@ -160,6 +192,13 @@ def main() -> None:
     for t in tables:
         if t not in EVENT_TABLES:
             raise SystemExit(f"Unknown table {t!r}. Allowed: {EVENT_TABLES}")
+
+    if not args.force and already_replayed(spark, landing_root, tables):
+        print(
+            f"[producer] landing already populated at {landing_root} for "
+            f"{tables} — skipping (pass --force to re-replay)"
+        )
+        return
 
     replay(spark, source_root, landing_root, tables, args.window_days)
 
