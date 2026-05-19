@@ -29,15 +29,22 @@ import sys
 from functools import cache
 from pathlib import Path
 
-# Make `src/` importable. Databricks spark_python_task does NOT set __file__
-# (runs via exec()) — use sys.argv[0] and walk up until we find `src/`.
+# Make `src/` importable AND resolve `contracts/` dir. Databricks
+# spark_python_task does NOT set __file__ (runs via exec()) and its CWD is
+# not the bundle root — so relative paths like `contracts/` don't resolve.
+# Walk up sys.argv[0] until we find both directories at the same parent.
 _script = Path(sys.argv[0]).resolve()
+_CONTRACTS_DIR = Path("contracts")  # default, overridden below
 for _p in (_script, *_script.parents):
     if _p.name == "src":
         sys.path.insert(0, str(_p))
+        if (_p.parent / "contracts").is_dir():
+            _CONTRACTS_DIR = _p.parent / "contracts"
         break
     if (_p / "src").is_dir():
         sys.path.insert(0, str(_p / "src"))
+        if (_p / "contracts").is_dir():
+            _CONTRACTS_DIR = _p / "contracts"
         break
 
 from delta.tables import DeltaTable  # noqa: E402
@@ -52,7 +59,7 @@ DIM_TABLES = ("customer", "product", "seller", "geolocation", "category")
 @cache
 def _contract(table: str):
     """Load the silver/dim_{table} contract once per process."""
-    return load_contract("silver", f"dim_{table}")
+    return load_contract("silver", f"dim_{table}", contracts_dir=_CONTRACTS_DIR)
 
 
 def natural_key(table: str) -> list[str]:

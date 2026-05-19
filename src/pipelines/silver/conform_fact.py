@@ -38,17 +38,20 @@ import sys
 from functools import cache
 from pathlib import Path
 
-# Make `src/` importable so `from dq.contracts import ...` works whether the
-# script runs via pytest or as a Databricks spark_python_task (which does NOT
-# set __file__ — runs via exec()). Walk up sys.argv[0] until we find a
-# directory named `src` or a parent containing `src/`.
+# Make `src/` importable AND resolve `contracts/` dir. Databricks
+# spark_python_task does NOT set __file__ and CWD is not the bundle root.
 _script = Path(sys.argv[0]).resolve()
+_CONTRACTS_DIR = Path("contracts")
 for _p in (_script, *_script.parents):
     if _p.name == "src":
         sys.path.insert(0, str(_p))
+        if (_p.parent / "contracts").is_dir():
+            _CONTRACTS_DIR = _p.parent / "contracts"
         break
     if (_p / "src").is_dir():
         sys.path.insert(0, str(_p / "src"))
+        if (_p / "contracts").is_dir():
+            _CONTRACTS_DIR = _p / "contracts"
         break
 
 from delta.tables import DeltaTable  # noqa: E402
@@ -63,7 +66,7 @@ EVENT_TABLES = ("orders", "order_items", "order_payments", "order_reviews")
 @cache
 def _contract(table: str):
     """Load the silver/fact_{table} contract once per process."""
-    return load_contract("silver", f"fact_{table}")
+    return load_contract("silver", f"fact_{table}", contracts_dir=_CONTRACTS_DIR)
 
 
 def natural_key(table: str) -> list[str]:
