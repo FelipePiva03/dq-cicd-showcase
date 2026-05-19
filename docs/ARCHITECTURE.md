@@ -70,7 +70,7 @@ can trust it.
 
 | Kind | Tables | Source | Update pattern |
 |---|---|---|---|
-| Fact | `silver.fact_orders`, `silver.fact_order_items`, `silver.fact_payments`, `silver.fact_reviews` | streaming events | MERGE on natural key via `foreachBatch` |
+| Fact | `silver.fact_orders`, `silver.fact_order_items`, `silver.fact_order_payments`, `silver.fact_order_reviews` | streaming events | MERGE on natural key via `foreachBatch` (contract values pre-resolved on the driver — see "foreachBatch pickling" note below) |
 | Dim | `silver.dim_customer`, `silver.dim_product`, `silver.dim_seller`, `silver.dim_geolocation`, `silver.dim_category` | batch dimensions | MERGE SCD Type 1 (overwrite) |
 
 **Why SCD1, not SCD2?** Olist is a static historical export — there is no
@@ -79,18 +79,20 @@ dataset. The SCD2 pattern is documented in [`docs/DABS_GUIDE.md`](DABS_GUIDE.md)
 as a swap-in for production scenarios.
 
 ### Gold — agg-by-purpose marts
-One table per analytical question. Wide, denormalized, BI-friendly.
-Examples:
+One table per analytical question. Wide, denormalized, BI-friendly. The
+two marts implemented for the showcase:
 
-| Mart | Question |
-|---|---|
-| `gold.daily_revenue` | Revenue / order count by purchase date |
-| `gold.delivery_performance` | On-time rate, avg delay, by state |
-| `gold.top_categories` | Revenue & unit volume by product category |
-| `gold.customer_lifetime_value` | First-purchase, last-purchase, total spend per customer |
+| Mart | Question | Source |
+|---|---|---|
+| `gold.daily_orders` | Order count per `(order_date, order_status)` | `silver.fact_orders` |
+| `gold.delivery_performance` | Avg + p95 `days_to_delivery` per week + delivered count | `silver.fact_orders` |
 
-GX checks here protect business semantics (no negative revenue,
-delivery_performance.on_time_rate between 0 and 1, etc).
+GX gates on the gold side enforce aggregate invariants (counts non-negative,
+percentile within plausible range, no week with zero delivered orders if
+upstream silver has rows). Adding more marts is mechanical: define the
+contract under `contracts/gold/{mart}.yml` and add a `gx_validation_{mart}`
+task to the job — the runner is already parameterized by `--layer` +
+`--table`.
 
 ## Event replay strategy
 
@@ -142,6 +144,37 @@ serverless support and runs cleanly across all three asset classes
 runner, so the swap was a single-script rewrite of `run_checkpoint.py`
 to be parameterized by `--layer` + `--table` instead of hard-coded to
 silver facts.
+
+### foreachBatch pickling on Spark Connect (the silver fact bug)
+
+A subtle gotcha worth documenting because it took a run to surface. On
+Databricks Serverless (`client: "2"`), `foreachBatch` cloudpickles its
+callback to the streaming worker. The original `_upsert` closure in
+`conform_fact.py` captured `_contract`, a `@functools.cache`-wrapped
+contract loader. cloudpickle falls back to **save-by-reference** for
+cache wrappers (it can't introspect the C wrapper's state), and Databricks
+runs `spark_python_task` scripts via `exec(open(filename).read())`, so the
+worker's `__module__` is `_engine_pyspark.databricks.workerwrap` — not a
+real importable module path. Worker-side resolution of `_contract` fails
+with:
+
+```
+StreamingPythonRunnerInitializationException
+AttributeError: Can't get attribute '_contract' on <module
+'_engine_pyspark.databricks.workerwrap'>
+```
+
+**Fix** (`src/pipelines/silver/conform_fact.py::upsert_to_silver`):
+resolve `keys`, `hard_rules_sql`, `merge_condition` on the driver
+**before** defining the inner `_upsert`. The closure now captures plain
+`str`/`list`. `split_quarantine()` was refactored to take the SQL string
+directly instead of re-resolving the contract internally — keeps the
+streaming worker free of any `_contract` reference.
+
+Pattern to follow for any future `foreachBatch` sink: every value the
+closure needs must be a primitive resolved on the driver. Module-level
+function references survive cloudpickle by-value serialization;
+`@cache`-wrapped or otherwise non-introspectable callables don't.
 
 ### Known source data quirk: Olist CSV escaping
 

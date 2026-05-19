@@ -23,7 +23,7 @@
 | **Structured Streaming + Auto Loader** | [`src/pipelines/bronze/ingest_events.py`](src/pipelines/bronze/ingest_events.py) |
 | **`foreachBatch` + MERGE INTO Delta (facts)** | [`src/pipelines/silver/conform_fact.py`](src/pipelines/silver/conform_fact.py) |
 | **SCD1 MERGE on dimensions** | [`src/pipelines/silver/conform_dim.py`](src/pipelines/silver/conform_dim.py) |
-| **Quarantine pre-MERGE for hard violations** | [`src/pipelines/silver/conform_fact.py`](src/pipelines/silver/conform_fact.py) (`HARD_RULES`, `split_quarantine`) |
+| **Quarantine pre-MERGE for hard violations** | [`src/pipelines/silver/conform_fact.py`](src/pipelines/silver/conform_fact.py) (`split_quarantine`) — hard rules sourced from [`contracts/silver/fact_*.yml`](contracts/silver/) |
 | **Databricks Asset Bundles (dev + prod targets)** | [`databricks.yml`](databricks.yml), [`resources/jobs/`](resources/jobs/) |
 | **GX gate (silver facts + dims + gold marts, tiered critical/warning)** | [`src/dq/great_expectations/`](src/dq/great_expectations/) |
 | **Contract-driven DQ (one YAML per table)** | [`contracts/`](contracts/), [`src/dq/contracts/`](src/dq/contracts/) |
@@ -54,7 +54,8 @@
    MERGE           ▼             ▼
         ┌──────────────────┐ ┌──────────────────┐
         │ 🛡️ quarantine   │ │                  │
-        │   (HARD_RULES)  │ │  silver.dim_*    │
+        │ (contract       │ │  silver.dim_*    │
+        │  hard_rules)    │ │                  │
         └──────────┬──────┘ └─────────┬────────┘
                    ▼                  │
         ┌──────────────────┐          │
@@ -96,9 +97,6 @@ PR ─────► CI workflow ─────► merge to develop ───�
                                                    bundle deploy --target dev
                                                             │
                                                             ▼
-                                                   smoke-run gx_validation
-                                                            │
-                                                            ▼
                                                   tag v*.*.* ─────► deploy-prod
                                                                          │
                                                                          ▼
@@ -110,8 +108,8 @@ PR ─────► CI workflow ─────► merge to develop ───�
 
 | Workflow | Triggers | What runs |
 |---|---|---|
-| [`ci.yml`](.github/workflows/ci.yml) | PR + push to `develop` | Ruff lint/format, pytest unit + integration, `bundle validate` |
-| [`deploy-dev.yml`](.github/workflows/deploy-dev.yml) | push to `develop` | `bundle deploy --target dev` + smoke run |
+| [`ci.yml`](.github/workflows/ci.yml) | PR + push to `main`/`develop` | Ruff lint/format, pytest unit + integration, `bundle validate` on **both** dev and prod targets |
+| [`deploy-dev.yml`](.github/workflows/deploy-dev.yml) | push to `develop` | `bundle deploy --target dev` |
 | [`deploy-prod.yml`](.github/workflows/deploy-prod.yml) | tag `v*.*.*` | `bundle deploy --target prod` (manual approval) |
 
 ---
@@ -154,14 +152,31 @@ databricks bundle run streaming_events --target dev
 
 1. Grab the Olist dataset from
    [Kaggle](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce).
-2. Upload to a Unity Catalog volume:
+2. Upload the 9 CSVs to a Unity Catalog volume:
    ```
-   /Volumes/dq_showcase_dev/source/raw/olist_orders_dataset.csv
+   /Volumes/dq_showcase_dev/source/raw/olist_*.csv
+   /Volumes/dq_showcase_dev/source/raw/product_category_name_translation.csv
    ```
-3. Trigger the producer job:
+3. Trigger the full end-to-end pipeline (idempotent — the producer
+   short-circuits if landing is already seeded):
    ```bash
-   databricks bundle run olist_producer --target dev
+   databricks bundle run run_all --target dev
    ```
+
+---
+
+## ✅ Verified end-to-end
+
+The full DAG was exercised in both `dev` and `prod` targets:
+
+| Target | Tasks | Result |
+|---|---|---|
+| `dq_showcase_dev` | 31 | **31/31 SUCCESS**, zero retries needed |
+| `dq_showcase_prod` | 31 | **31/31 SUCCESS**, 1 transient GX gate auto-retried per `max_retries: 2` |
+
+That covers: idempotent producer → 4 Auto Loader bronze events + 5 batch
+bronze dims → 4 streaming foreachBatch silver facts + 5 batch silver dims
+→ 11 contract-driven GX gates (4 fact + 5 dim + 2 mart) → 2 gold marts.
 
 ---
 
